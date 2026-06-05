@@ -421,10 +421,15 @@ namespace BubbyPlanetShowroom
             draftLayout.Dock = DockStyle.Fill;
             draftLayout.ColumnCount = 1;
             draftLayout.RowCount = 2;
-            draftLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26F));
+            draftLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36F));
             draftLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
-            Panel draftHeader = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(15, 23, 42) };
+            Panel draftHeader = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.FromArgb(15, 23, 42),
+                Height = 36
+            };
             Label lblDraft = new Label
             {
                 Text = "Draft (Not Added Items)",
@@ -433,7 +438,7 @@ namespace BubbyPlanetShowroom
                 AutoSize = false,
                 TextAlign = ContentAlignment.MiddleLeft,
                 Padding = new Padding(10, 0, 0, 0),
-                Width = 220
+                Width = 220,
             };
 
             btnRetryDraft = new Button
@@ -445,6 +450,7 @@ namespace BubbyPlanetShowroom
                 BackColor = Color.FromArgb(30, 64, 175),
                 ForeColor = Color.White
             };
+            btnRetryDraft.Height = 30;
             btnRetryDraft.FlatAppearance.BorderSize = 0;
             btnRetryDraft.Click += (s, e) => RetrySelectedDraft();
 
@@ -457,6 +463,7 @@ namespace BubbyPlanetShowroom
                 BackColor = Color.FromArgb(100, 116, 139),
                 ForeColor = Color.White
             };
+            btnClearDraft.Height = 30;
             btnClearDraft.FlatAppearance.BorderSize = 0;
             btnClearDraft.Click += (s, e) =>
             {
@@ -665,12 +672,6 @@ namespace BubbyPlanetShowroom
 
             rightPanel.Controls.Add(customerLayout);
 
-            Label lblHoldBills = new Label();
-            lblHoldBills.Text = "Hold Bills";
-            lblHoldBills.Dock = DockStyle.Top;
-            lblHoldBills.Height = 25;
-            lblHoldBills.Font = new Font("Segoe UI", 9, FontStyle.Bold);
-
             lstHoldBills = new ListBox();
             lstHoldBills.Dock = DockStyle.Bottom;
             lstHoldBills.Height = 150;
@@ -678,7 +679,6 @@ namespace BubbyPlanetShowroom
             lstHoldBills.DoubleClick += LstHoldBills_DoubleClick;
 
             rightPanel.Controls.Add(lstHoldBills);
-            rightPanel.Controls.Add(lblHoldBills);
 
             dgvRight.CellEndEdit += DgvRight_CellEndEdit;
             dgvRight.RowsAdded += (s, e) => UpdateActionButtonsState();
@@ -1889,11 +1889,11 @@ LIMIT 1;", conn);
                 return false;
             }
 
-            if (!HasInternetConnection())
-            {
-                MessageBox.Show("Internet connection is not available. Please connect to internet and try again.");
-                return false;
-            }
+            //if (!HasInternetConnection())
+            //{
+            //    MessageBox.Show("Internet connection is not available. Please connect to internet and try again.");
+            //    return false;
+            //}
 
             ConfigureReceiptPaperSize();
             PrinterRouting.ApplyReceiptReturnPrinter(printDocument);

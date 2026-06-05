@@ -82,27 +82,27 @@ namespace BubbyPlanetShowroom
 
         private void ShowOfflinePopup()
         {
-            if (statusForm != null && !statusForm.IsDisposed)
-            {
-                statusForm.TopMost = true;
-                statusForm.Activate();
-                return;
-            }
+            //if (statusForm != null && !statusForm.IsDisposed)
+            //{
+            //    statusForm.TopMost = true;
+            //    statusForm.Activate();
+            //    return;
+            //}
 
-            statusForm = new InternetStatusForm();
-            statusForm.FormClosed += (s, e) => statusForm = null;
-            statusForm.Show(uiOwner);
-            statusForm.BringToFront();
+            //statusForm = new InternetStatusForm();
+            //statusForm.FormClosed += (s, e) => statusForm = null;
+            //statusForm.Show(uiOwner);
+            //statusForm.BringToFront();
         }
 
         private void HideOfflinePopup()
         {
-            if (statusForm == null || statusForm.IsDisposed)
-                return;
+            //if (statusForm == null || statusForm.IsDisposed)
+            //    return;
 
-            statusForm.AllowClose();
-            statusForm.Close();
-            statusForm = null;
+            //statusForm.AllowClose();
+            //statusForm.Close();
+            //statusForm = null;
         }
 
         private static async Task<bool> IsInternetAvailableAsync(CancellationToken token)
