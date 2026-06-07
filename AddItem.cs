@@ -429,12 +429,13 @@ namespace BubbyPlanetShowroom
 
             lastAddedBox.Controls.Add(lblLastAdded);
 
-            cmbMain.DropDownStyle = ComboBoxStyle.DropDown;
-            cmbSub.DropDownStyle = ComboBoxStyle.DropDown;
-            cmbGender.DropDownStyle = ComboBoxStyle.DropDown;
-            cmbItemType.DropDownStyle = ComboBoxStyle.DropDown;
-            cmbActual.DropDownStyle = ComboBoxStyle.DropDown;
-            cmbSize.DropDownStyle = ComboBoxStyle.DropDown;
+            cmbMain.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbSub.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbGender.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbItemType.DropDownStyle = ComboBoxStyle.DropDownList;
+
+            cmbActual.DropDownStyle = ComboBoxStyle.DropDown;   // type + select
+            cmbSize.DropDownStyle = ComboBoxStyle.DropDown;     // type + select
 
             panel.Controls.Add(actions);
             panel.Controls.Add(lastAddedBox);
