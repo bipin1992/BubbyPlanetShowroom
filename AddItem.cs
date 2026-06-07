@@ -15,6 +15,7 @@ namespace BubbyPlanetShowroom
         TextBox txtBrand = new TextBox();
         TextBox txtSupplier = new TextBox();
         //TextBox txtColor = new TextBox();
+        CheckBox chkDirectPriceCode = new CheckBox();
 
         TextBox txtCost = new TextBox();
         TextBox txtBeforeTax = new TextBox();
@@ -86,6 +87,8 @@ namespace BubbyPlanetShowroom
                 LoadSubCategory();
                 ClearGeneratedItemIdentity();
                 ClearPriceFields();
+
+                HandleDirectPriceMode();   // <-- add this
             };
 
             // Sub category change
@@ -143,8 +146,7 @@ namespace BubbyPlanetShowroom
             cmbSize.TextChanged += (s, e) => GenerateItemDetails();
             txtSell.TextChanged += (s, e) =>
             {
-                if (IsToys() || IsFootwears())
-                    GenerateItemDetails();
+                GenerateItemDetails();
             };
 
             cmbGender.Items.Clear();
@@ -154,47 +156,15 @@ namespace BubbyPlanetShowroom
             cmbGender.Items.Add("NA");
             cmbGender.SelectedIndex = 0;
 
-            //Label lblCenter = new Label();
-
-            //lblCenter.Text =
-            //"FINAL READY REFERENCE\n\n" +
-            //"5% GST  → 20 ka multiple\n" +
-            //"20, 40, 60, 80, 100...\n\n" +
-            //"12% GST → 25 ka multiple\n" +
-            //"25, 50, 75, 100, 125...\n\n" +
-            //"18% GST → 50 ka multiple\n" +
-            //"50, 100, 150, 200...\n\n" +
-            //"Shortcut:\n" +
-            //"5% → 20   |   12% → 25   |   18% → 50";
-
-            //// 🔥 width chota (left-right margin milega)
-            //lblCenter.Size = new Size(this.Width - 500, 180);
-
-            //lblCenter.BackColor = Color.DarkRed;
-            //lblCenter.ForeColor = Color.White;
-
-            //// 🔥 multi-line center alignment
-            //lblCenter.TextAlign = ContentAlignment.MiddleCenter;
-            //lblCenter.Font = new Font("Segoe UI", 9, FontStyle.Bold);
-
-            //// 🔥 position
-            //lblCenter.Left = (this.Width - lblCenter.Width) / 2;
-            //lblCenter.Top = 20;
-
-            //// 🔥 resize handling
-            //this.Resize += (s, e) =>
-            //{
-            //    lblCenter.Width = this.Width - 500; // maintain margin
-            //    lblCenter.Left = (this.Width - lblCenter.Width) / 2;
-            //};
-
-            //Controls.Add(lblCenter);
-            //lblCenter.BringToFront();
-
             txtBrand.Text = lastBrand;
             txtSupplier.Text = lastSupplier;
             txtGST.Text = "0";
             printDoc.PrintPage += PrintDoc_PrintPage;
+
+            chkDirectPriceCode.CheckedChanged += (s, e) =>
+            {
+                HandleDirectPriceMode();
+            };
         }
 
         void ApplySafeSplitter(SplitContainer split)
@@ -360,13 +330,29 @@ namespace BubbyPlanetShowroom
             AddRow(itemGrid, "Supplier", txtSupplier);
 
             TableLayoutPanel categoryGrid = CreateFormGrid();
-            AddRow(categoryGrid, "Main Category", cmbMain);
+            //AddRow(categoryGrid, "Main Category", cmbMain);
+            FlowLayoutPanel pnlMainCategory = new FlowLayoutPanel();
+            pnlMainCategory.AutoSize = true;
+            pnlMainCategory.FlowDirection = FlowDirection.LeftToRight;
+
+            chkDirectPriceCode.Text = "Direct Price Code";
+            chkDirectPriceCode.AutoSize = true;
+
+            pnlMainCategory.Controls.Add(cmbMain);
+            pnlMainCategory.Controls.Add(chkDirectPriceCode);
+
+            AddRow(categoryGrid, "Main Category", pnlMainCategory);
             AddRow(categoryGrid, "Sub Category", cmbSub);
             AddRow(categoryGrid, "Gender", cmbGender);
             AddRow(categoryGrid, "Item Type", cmbItemType);
             AddRow(categoryGrid, "Actual Item", cmbActual);
             AddRow(categoryGrid, "Size", cmbSize);
             //AddRow(grid, "Color", txtColor);
+
+            //chkDirectPriceCode.Text = "Direct Price Code";
+            //chkDirectPriceCode.AutoSize = true;
+
+            //AddRow(categoryGrid, "Direct Code", chkDirectPriceCode);
 
             TableLayoutPanel priceGrid = CreateFormGrid();
             AddRow(priceGrid, "Cost Price", txtCost);
@@ -394,7 +380,7 @@ namespace BubbyPlanetShowroom
             btnClear.ForeColor = Color.White;
             btnClear.FlatStyle = FlatStyle.Flat;
             btnClear.FlatAppearance.BorderSize = 0;
-            btnClear.Click += (s, e) => ClearFields();
+            btnClear.Click += (s, e) => ClearFieldsAll();
 
             btnPrint.Text = "Print Label";
             btnPrint.Width = 110;
@@ -1255,6 +1241,12 @@ namespace BubbyPlanetShowroom
 
         void GenerateItemDetails()
         {
+            if (chkDirectPriceCode.Checked)
+            {
+                GenerateDirectPriceCode();
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(cmbMain.Text) ||
                 string.IsNullOrWhiteSpace(cmbActual.Text))
                 return;
@@ -1557,21 +1549,16 @@ namespace BubbyPlanetShowroom
 
                 string baseCode = txtCode.Text.Trim();
                 string finalCode = baseCode;
-                bool isToyItemTypeItem =
-                    IsToys() &&
-                    string.Equals(cmbItemType.Text.Trim(), "Item", StringComparison.OrdinalIgnoreCase);
-                bool isFootwearItemTypeItem =
-                    IsFootwears() &&
-                    string.Equals(cmbItemType.Text.Trim(), "Item", StringComparison.OrdinalIgnoreCase);
-                bool isStrictDuplicateCase = isToyItemTypeItem || isFootwearItemTypeItem;
+
+                bool isStrictDuplicateCase = chkDirectPriceCode.Checked;
 
                 // Toys/Footwears + Item type "Item" => strict duplicate block (no serial child code)
                 if (isStrictDuplicateCase)
                 {
                     string qStrictDup = $@"
-        SELECT COUNT(*) 
-        FROM inv_items_master 
-        WHERE item_code = '{baseCode}'";
+                                        SELECT COUNT(*) 
+                                        FROM inv_items_master 
+                                        WHERE item_code = '{baseCode}'";
 
                     var dtStrictDup = DB.GetData(qStrictDup);
                     if (Convert.ToInt32(dtStrictDup.Rows[0][0]) > 0)
@@ -1583,9 +1570,9 @@ namespace BubbyPlanetShowroom
 
                 // -------- CHECK IF BASE (PARENT) EXISTS --------
                 string qCheck = $@"
-        SELECT serial_no 
-        FROM inv_items_master 
-        WHERE item_code = '{baseCode}'";
+                                SELECT serial_no 
+                                FROM inv_items_master 
+                                WHERE item_code = '{baseCode}'";
 
                 var dt = DB.GetData(qCheck);
 
@@ -1598,9 +1585,9 @@ namespace BubbyPlanetShowroom
 
                     // UPDATE parent counter
                     string qUpdate = $@"
-            UPDATE inv_items_master 
-            SET serial_no = {newSerial}
-            WHERE item_code = '{baseCode}'";
+                                    UPDATE inv_items_master 
+                                    SET serial_no = {newSerial}
+                                    WHERE item_code = '{baseCode}'";
 
                     DB.Execute(qUpdate);
 
@@ -1615,9 +1602,9 @@ namespace BubbyPlanetShowroom
 
                 // -------- SAFETY CHECK (UNIQUE) --------
                 string qDup = $@"
-        SELECT COUNT(*) 
-        FROM inv_items_master 
-        WHERE item_code = '{finalCode}'";
+                                SELECT COUNT(*) 
+                                FROM inv_items_master 
+                                WHERE item_code = '{finalCode}'";
 
                 var dtDup = DB.GetData(qDup);
 
@@ -1629,44 +1616,44 @@ namespace BubbyPlanetShowroom
 
                 // -------- INSERT --------
                 string qInsert = $@"
-        INSERT INTO inv_items_master
-        (
-            item_code,
-            serial_no,
-            item_name,
-            main_category,
-            sub_category,
-            gender,
-            item_type,
-            actual_item,
-            size,
-            color,
-            cost_price,
-            price_before_tax,
-            selling_price,
-            brand,
-            supplier_name,
-            GST
-        )
-        VALUES
-        (
-            '{finalCode}',
-            0,
-            '{txtName.Text}',
-            '{cmbMain.Text}',
-            '{cmbSub.Text}',
-            '{cmbGender.Text}',
-            '{cmbItemType.Text}',
-            '{cmbActual.Text}',
-            '{cmbSize.Text}',
-            '{""}',
-            {cost},
-            {beforeTax},
-            {sell},
-            '{txtBrand.Text}',
-            '{txtSupplier.Text}',
-            {gst}
-        )";
+                                INSERT INTO inv_items_master
+                                (
+                                    item_code,
+                                    serial_no,
+                                    item_name,
+                                    main_category,
+                                    sub_category,
+                                    gender,
+                                    item_type,
+                                    actual_item,
+                                    size,
+                                    color,
+                                    cost_price,
+                                    price_before_tax,
+                                    selling_price,
+                                    brand,
+                                    supplier_name,
+                                    GST
+                                )
+                                VALUES
+                                (
+                                    '{finalCode}',
+                                    0,
+                                    '{txtName.Text}',
+                                    '{cmbMain.Text}',
+                                    '{cmbSub.Text}',
+                                    '{cmbGender.Text}',
+                                    '{cmbItemType.Text}',
+                                    '{cmbActual.Text}',
+                                    '{cmbSize.Text}',
+                                    '{""}',
+                                    {cost},
+                                    {beforeTax},
+                                    {sell},
+                                    '{txtBrand.Text}',
+                                    '{txtSupplier.Text}',
+                                    {gst}
+                                )";
 
                 DB.Execute(qInsert);
 
@@ -1694,13 +1681,10 @@ namespace BubbyPlanetShowroom
             lastSupplier = txtSupplier.Text;
         }
 
-        void ClearFields()
+        void ClearFieldsAll()
         {
             txtCode.Clear();
             txtName.Clear();
-            //txtBrand.Clear();
-            //txtSupplier.Clear();
-            //txtColor.Clear();
 
             txtCost.Clear();
             txtBeforeTax.Clear();
@@ -1709,9 +1693,29 @@ namespace BubbyPlanetShowroom
 
             cmbMain.SelectedIndex = -1;
             cmbSub.SelectedIndex = -1;
+            cmbGender.SelectedIndex = -1;
             cmbItemType.SelectedIndex = -1;
             cmbActual.SelectedIndex = -1;
             cmbSize.SelectedIndex = -1;
+
+            txtBrand.Clear();
+            txtSupplier.Clear();
+        }
+
+        void ClearFields()
+        {
+            txtCode.Clear();
+            txtName.Clear();
+
+            txtCost.Clear();
+            txtBeforeTax.Clear();
+            txtGST.Text = "0";
+            txtSell.Clear();
+
+            // Sirf size reset
+            cmbSize.SelectedIndex = -1;
+
+            GenerateItemDetails();
         }
 
         bool TryGetItemContext(out string code, out string name, out string size, out string price)
@@ -1972,6 +1976,47 @@ namespace BubbyPlanetShowroom
                 $"Code: {lastSavedItemCode}\n" +
                 $"Name: {lastSavedItemName}\n" +
                 $"Size: {size}   Price: {lastSavedPrice}";
+        }
+
+        void HandleDirectPriceMode()
+        {
+            bool directMode = chkDirectPriceCode.Checked;
+
+            cmbSub.Enabled = !directMode;
+            cmbGender.Enabled = !directMode;
+            cmbItemType.Enabled = !directMode;
+            cmbActual.Enabled = !directMode;
+            cmbSize.Enabled = !directMode;
+
+            if (directMode)
+            {
+                cmbSub.SelectedIndex = -1;
+                cmbGender.SelectedIndex = -1;
+                cmbItemType.SelectedIndex = -1;
+                cmbActual.SelectedIndex = -1;
+                cmbSize.SelectedIndex = -1;
+
+                GenerateItemDetails();
+            }
+        }
+
+        void GenerateDirectPriceCode()
+        {
+            if (!decimal.TryParse(txtSell.Text, out decimal sell))
+                return;
+
+            string prefix = "";
+
+            if (IsClothes())
+                prefix = "C";
+            else if (IsFootwears())
+                prefix = "F";
+            else if (IsToys())
+                prefix = "T";
+
+            txtCode.Text = prefix + ((int)sell).ToString();
+
+            txtName.Text = cmbMain.Text + " Direct Item";
         }
 
     }

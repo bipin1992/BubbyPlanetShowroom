@@ -45,6 +45,8 @@ namespace BubbyPlanetShowroom
                 internetMonitor?.Dispose();
                 internetMonitor = null;
             };
+
+            this.FormClosing += MainForm_FormClosing;
         }
 
         private void InitializeLayout()
@@ -121,6 +123,7 @@ namespace BubbyPlanetShowroom
             AddMenuButton("Users");
             AddMenuButton("Revenue");
             AddMenuButton("Discount");
+            AddMenuButton("Selling");
         }
 
         private void AddMenuButton(string text)
@@ -158,6 +161,7 @@ namespace BubbyPlanetShowroom
                     "Users" => new Users(),
                     "Revenue" => new Revenue(), // ✅ NEW
                     "Discount" => new DiscountManager(CurrentRole),
+                    "Selling" => new Selling(),
                     _ => null
                 };
 
@@ -237,12 +241,28 @@ namespace BubbyPlanetShowroom
                         }
                     }
 
-                    if (btn.Text == "Discount")
-                    {
-                        btn.Visible = (role == "Master Admin");
-                    }
+                    //if (btn.Text == "Discount")
+                    //{
+                    //    btn.Visible = (role == "Master Admin");
+                    //}
 
                 }
+            }
+        }
+
+        private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            try
+            {
+                DBBackup.CreateBackup();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    "Database backup failed.\n\n" + ex.Message,
+                    "Backup Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
             }
         }
     }
