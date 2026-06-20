@@ -35,13 +35,13 @@ namespace BubbyPlanetShowroom
 
         private void btnLogin_Click(object sender, EventArgs e)
         {
-            //string username = txtUsername.Text.Trim();
-            //string password = txtPassword.Text.Trim();
-            //string role = cmbRole.SelectedItem?.ToString();
+            string username = txtUsername.Text.Trim();
+            string password = txtPassword.Text.Trim();
+            string role = cmbRole.SelectedItem?.ToString();
 
-            string username = "Bipin";
-            string password = "1234";
-            string role = "Master Admin";
+            //string username = "Bipin";
+            //string password = "1234";
+            //string role = "Master Admin";
 
             if (username == "" || password == "" || role == "")
             {

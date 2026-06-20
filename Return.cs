@@ -296,18 +296,23 @@ namespace BubbyPlanetShowroom
 
                     // Load Items
                     string itemQuery =
-                    @"SELECT 
+                    @"SELECT
                         od.id,
                         od.item_id,
                         i.item_code,
                         i.item_name,
                         od.qty,
                         IFNULL(od.return_qty,0) return_qty,
-                        od.price,
-                        od.subtotal,
+
+                        od.selling_price,
+                        od.gross_amount,
+
                         od.discount_percent,
-                        od.tax,
-                        od.total
+                        od.discount_amount,
+
+                        od.taxable_amount,
+                        od.gst_amount,
+                        od.net_amount
                     FROM inv_order_details od
                     JOIN inv_items_master i ON i.id = od.item_id
                     WHERE od.order_id = @orderId";
@@ -340,6 +345,7 @@ namespace BubbyPlanetShowroom
                     }
 
                     grid.DataSource = dt;
+
                     grid.Columns["discount_percent"].HeaderText = "Disc %";
 
                     grid.Columns["discount_percent"].AutoSizeMode =
@@ -353,64 +359,108 @@ namespace BubbyPlanetShowroom
                     grid.Columns["discount_percent"].DefaultCellStyle.Alignment =
                         DataGridViewContentAlignment.MiddleCenter;
 
-                    grid.Columns["id"].Visible = false;
-                    grid.Columns["item_id"].Visible = false;
-                    grid.Columns["item_code"].Visible = false;
-                    grid.Columns["subtotal"].Visible = false;
+                    // Hide internal columns
+                    if (grid.Columns.Contains("id"))
+                        grid.Columns["id"].Visible = false;
 
+                    if (grid.Columns.Contains("item_id"))
+                        grid.Columns["item_id"].Visible = false;
+
+                    if (grid.Columns.Contains("item_code"))
+                        grid.Columns["item_code"].Visible = false;
+
+                    if (grid.Columns.Contains("gross_amount"))
+                        grid.Columns["gross_amount"].Visible = false;
+
+                    if (grid.Columns.Contains("discount_amount"))
+                        grid.Columns["discount_amount"].Visible = false;
+
+                    if (grid.Columns.Contains("taxable_amount"))
+                        grid.Columns["taxable_amount"].Visible = false;
+
+                    // Column captions
+                    grid.Columns["item_name"].HeaderText = "Item";
+                    grid.Columns["qty"].HeaderText = "Qty";
+                    grid.Columns["return_qty"].HeaderText = "Returned";
+                    grid.Columns["selling_price"].HeaderText = "Price";
+                    grid.Columns["discount_percent"].HeaderText = "Disc %";
+                    grid.Columns["gst_amount"].HeaderText = "GST";
+                    grid.Columns["net_amount"].HeaderText = "Net";
+
+                    // Display order
                     grid.Columns["item_name"].DisplayIndex = 0;
                     grid.Columns["qty"].DisplayIndex = 1;
                     grid.Columns["return_qty"].DisplayIndex = 2;
-                    grid.Columns["price"].DisplayIndex = 3;
+                    grid.Columns["selling_price"].DisplayIndex = 3;
                     grid.Columns["discount_percent"].DisplayIndex = 4;
-                    grid.Columns["tax"].DisplayIndex = 5;
-                    grid.Columns["total"].DisplayIndex = 6;
+                    grid.Columns["gst_amount"].DisplayIndex = 5;
+                    grid.Columns["net_amount"].DisplayIndex = 6;
 
+                    // Formats
+                    grid.Columns["selling_price"].DefaultCellStyle.Format = "0.00";
+                    grid.Columns["gst_amount"].DefaultCellStyle.Format = "0.00";
+                    grid.Columns["net_amount"].DefaultCellStyle.Format = "0.00";
                     grid.Columns["discount_percent"].DefaultCellStyle.Format = "0.##";
-                    grid.Columns["discount_percent"].Width = 90;
+
+                    // Widths
+                    grid.Columns["item_name"].Width = 260;
+                    grid.Columns["qty"].Width = 70;
+                    grid.Columns["return_qty"].Width = 90;
+                    grid.Columns["selling_price"].Width = 90;
+                    grid.Columns["discount_percent"].Width = 80;
+                    grid.Columns["gst_amount"].Width = 90;
+                    grid.Columns["net_amount"].Width = 100;
 
                     // Add ReturnQty column
                     if (!grid.Columns.Contains("ReturnQty"))
                     {
-                        DataGridViewTextBoxColumn col = new DataGridViewTextBoxColumn();
+                        DataGridViewTextBoxColumn col =
+                            new DataGridViewTextBoxColumn();
+
                         col.Name = "ReturnQty";
                         col.HeaderText = "Return Qty";
+
                         grid.Columns.Add(col);
                     }
 
                     // Add Refund column
                     if (!grid.Columns.Contains("Refund"))
                     {
-                        DataGridViewTextBoxColumn col = new DataGridViewTextBoxColumn();
+                        DataGridViewTextBoxColumn col =
+                            new DataGridViewTextBoxColumn();
+
                         col.Name = "Refund";
                         col.HeaderText = "Refund";
                         col.ReadOnly = true;
+
                         grid.Columns.Add(col);
                     }
 
-                    // Make all columns readonly
+                    // Make all readonly
                     foreach (DataGridViewColumn column in grid.Columns)
                     {
                         column.ReadOnly = true;
                     }
 
-                    // Allow only ReturnQty editable
-                    if (grid.Columns.Contains("ReturnQty"))
-                    {
-                        grid.Columns["ReturnQty"].ReadOnly = false;
-                    }
+                    // Only ReturnQty editable
+                    grid.Columns["ReturnQty"].ReadOnly = false;
 
-                    // Header color (already blue hai, but ensure)
-                    grid.Columns["ReturnQty"].HeaderCell.Style.BackColor = Color.FromArgb(0, 120, 215);
-                    grid.Columns["ReturnQty"].HeaderCell.Style.ForeColor = Color.White;
+                    // ReturnQty styling
+                    grid.Columns["ReturnQty"].HeaderCell.Style.BackColor =
+                        Color.FromArgb(0, 120, 215);
 
-                    // Entire column color
-                    grid.Columns["ReturnQty"].DefaultCellStyle.BackColor = Color.FromArgb(230, 240, 255);
-                    grid.Columns["ReturnQty"].DefaultCellStyle.ForeColor = Color.Black;
+                    grid.Columns["ReturnQty"].HeaderCell.Style.ForeColor =
+                        Color.White;
 
-                    // Selection color (important for clean look)
-                    grid.Columns["ReturnQty"].DefaultCellStyle.SelectionBackColor = Color.FromArgb(180, 210, 255);
-                    grid.Columns["ReturnQty"].DefaultCellStyle.SelectionForeColor = Color.Black;
+                    grid.Columns["ReturnQty"].DefaultCellStyle.BackColor =
+                        Color.FromArgb(230, 240, 255);
+
+                    grid.Columns["ReturnQty"].DefaultCellStyle.SelectionBackColor =
+                        Color.FromArgb(180, 210, 255);
+
+                    grid.Columns["ReturnQty"].DefaultCellStyle.SelectionForeColor =
+                        Color.Black;
+
                     grid.Enabled = true;
                     btnProcess.Enabled = grid.Rows.Count > 0;
                     btnReset.Enabled = true;
@@ -453,7 +503,7 @@ namespace BubbyPlanetShowroom
                     return;
                 }
 
-                decimal total = Convert.ToDecimal(row.Cells["total"].Value);
+                decimal total = Convert.ToDecimal(row.Cells["net_amount"].Value);
 
                 int allowed = qty - returned;
 
@@ -560,9 +610,20 @@ namespace BubbyPlanetShowroom
                         int returnNow = 0;
                         int.TryParse(row.Cells["ReturnQty"].Value?.ToString(), out returnNow);
 
-                        decimal total = Convert.ToDecimal(row.Cells["total"].Value);
-                        decimal subtotalCurrent = Convert.ToDecimal(row.Cells["subtotal"].Value);
-                        decimal tax = Convert.ToDecimal(row.Cells["tax"].Value);
+                        decimal gross = Convert.ToDecimal(row.Cells["gross_amount"].Value);
+
+                        decimal discountAmount =
+                            Convert.ToDecimal(row.Cells["discount_amount"].Value);
+
+                        decimal total =
+                            Convert.ToDecimal(row.Cells["net_amount"].Value);
+
+                        decimal subtotalCurrent =
+                            Convert.ToDecimal(row.Cells["taxable_amount"].Value);
+
+                        decimal tax =
+                            Convert.ToDecimal(row.Cells["gst_amount"].Value);
+
                         string itemCode = row.Cells["item_code"].Value?.ToString() ?? "";
 
                         int detailId = Convert.ToInt32(row.Cells["id"].Value);
@@ -584,32 +645,65 @@ namespace BubbyPlanetShowroom
                             if (currentRemaining <= 0)
                                 continue;
 
-                        // paid amount proportion after discount/GST
-                            decimal perItem = total / currentRemaining;
-                            decimal newTotal = Round2(perItem * newRemaining);
-                            decimal taxPerItem = tax / currentRemaining;
-                            decimal newTax = Round2(taxPerItem * newRemaining);
-                            decimal subtotalPerItem = subtotalCurrent / currentRemaining;
-                            decimal newSubtotal = Round2(subtotalPerItem * newRemaining);
+                            // paid amount proportion after discount/GST
+                            decimal perItem =
+                                total / currentRemaining;
 
-                        // refund
+                            decimal newTotal =
+                                Round2(perItem * newRemaining);
+
+                            decimal taxPerItem =
+                                tax / currentRemaining;
+
+                            decimal newTax =
+                                Round2(taxPerItem * newRemaining);
+
+                            decimal subtotalPerItem =
+                                subtotalCurrent / currentRemaining;
+
+                            decimal newSubtotal =
+                                Round2(subtotalPerItem * newRemaining);
+
+                            decimal grossPerItem =
+                                gross / currentRemaining;
+
+                            decimal newGross =
+                                Round2(grossPerItem * newRemaining);
+
+                            decimal discountPerItem =
+                                discountAmount / currentRemaining;
+
+                            decimal newDiscount =
+                                Round2(discountPerItem * newRemaining);
+
+                            // refund
                             decimal refund = Round2(perItem * returnNow);
                             totalRefund += refund;
 
                         // ✅ UPDATE order_details (FULL CORRECT)
                             MySqlCommand cmd = new MySqlCommand(@"
-                    UPDATE inv_order_details 
-                    SET 
-                        return_qty = @rqty,
-                        subtotal = @sub,
-                        tax = @tax,
-                        total = @total
-                    WHERE id = @id", con, transaction);
+                            UPDATE inv_order_details
+                                SET
+                                    return_qty = @rqty,
+                                    gross_amount = @gross,
+                                    discount_amount = @disc,
+                                    taxable_amount = @sub,
+                                    gst_amount = @tax,
+                                    net_amount = @total
+                                WHERE id = @id", con, transaction);
 
                             cmd.Parameters.AddWithValue("@rqty", newReturnQty);
+
+                            cmd.Parameters.AddWithValue("@gross", newGross);
+
+                            cmd.Parameters.AddWithValue("@disc", newDiscount);
+
                             cmd.Parameters.AddWithValue("@sub", newSubtotal);
+
                             cmd.Parameters.AddWithValue("@tax", newTax);
+
                             cmd.Parameters.AddWithValue("@total", newTotal);
+
                             cmd.Parameters.AddWithValue("@id", detailId);
 
                             cmd.ExecuteNonQuery();
@@ -630,13 +724,13 @@ namespace BubbyPlanetShowroom
 
                 // ✅ UPDATE orders table (SUM based)
                     MySqlCommand cmd2 = new MySqlCommand(@"
-            SELECT 
-                IFNULL(SUM(subtotal),0),
-                IFNULL(SUM(tax),0),
-                IFNULL(SUM(total),0),
-                IFNULL(SUM((price * (qty - IFNULL(return_qty,0))) * (discount_percent / 100)),0)
-            FROM inv_order_details 
-            WHERE order_id = @oid", con, transaction);
+                    SELECT
+                    IFNULL(SUM(taxable_amount),0),
+                    IFNULL(SUM(gst_amount),0),
+                    IFNULL(SUM(net_amount),0),
+                    IFNULL(SUM(discount_amount),0)
+                    FROM inv_order_details 
+                    WHERE order_id = @oid", con, transaction);
 
                     cmd2.Parameters.AddWithValue("@oid", orderId);
 

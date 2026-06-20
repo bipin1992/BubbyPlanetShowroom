@@ -409,20 +409,20 @@ namespace BubbyPlanetShowroom
 
             // 🟢 TODAY
             decimal today = GetValue(con,
-                "DATE(date_added) = (SELECT DATE(MAX(date_added)) FROM inv_orders)");
+                "DATE(date_added) = CURDATE()");
 
             // 🟠 WEEK (last 7 days)
             decimal week = GetValue(con,
-                "DATE(date_added) >= DATE_SUB((SELECT MAX(date_added) FROM inv_orders), INTERVAL 7 DAY)");
+                "DATE(date_added) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)");
 
-            // 🔵 MONTH (current month of latest data)
+            // 🔵 MONTH
             decimal month = GetValue(con,
-                "YEAR(date_added)=YEAR((SELECT MAX(date_added) FROM inv_orders)) " +
-                "AND MONTH(date_added)=MONTH((SELECT MAX(date_added) FROM inv_orders))");
+                "YEAR(date_added)=YEAR(CURDATE()) " +
+                "AND MONTH(date_added)=MONTH(CURDATE())");
 
-            // 🔷 YEAR (current year of latest data)
+            // 🔷 YEAR
             decimal year = GetValue(con,
-                "YEAR(date_added)=YEAR((SELECT MAX(date_added) FROM inv_orders))");
+                "YEAR(date_added)=YEAR(CURDATE())");
 
             // ⚫ TOTAL
             decimal total = GetValue(con, "1=1");
@@ -445,7 +445,7 @@ namespace BubbyPlanetShowroom
                 query = @"
                 SELECT DATE(date_added) grp, SUM(grand_total) total
                 FROM inv_orders
-                WHERE DATE(date_added) = (SELECT DATE(MAX(date_added)) FROM inv_orders)
+                WHERE DATE(date_added) = CURDATE()
                 HAVING SUM(grand_total) > 0";
 
             }

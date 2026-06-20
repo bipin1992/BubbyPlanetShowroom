@@ -13,19 +13,61 @@ using ZXing.Common;
 using ZXing.Windows.Compatibility;
 using MySqlX.XDevAPI;
 using System.Collections.Generic;
+using Mysqlx.Crud;
+using System.Transactions;
 
 public class HoldBill
 {
     public string Token { get; set; }
     public DateTime CreatedOn { get; set; }
-
     public List<HoldItem> Items { get; set; } = new();
+
+    public bool RewardApplied { get; set; }
+
+    public decimal RewardDiscountPercent { get; set; }
+
+    public string Mobile { get; set; }
+
+    public string FirstName { get; set; }
+
+    public string Surname { get; set; }
 }
 
 public class HoldItem
 {
     public string ItemCode { get; set; }
+
+    public string ItemName { get; set; }
+
+    public string Size { get; set; }
+
+    public decimal Price { get; set; }
+
     public int Qty { get; set; }
+
+    public decimal Discount { get; set; }
+
+    public decimal AutoDiscount { get; set; }
+
+    public decimal ManualDiscount { get; set; }
+
+    public decimal RewardDiscount { get; set; }
+
+    public decimal Gross { get; set; }
+
+    public decimal Taxable { get; set; }
+
+    public decimal GST { get; set; }
+
+    public decimal Net { get; set; }
+
+    public bool DiscountManual { get; set; }
+
+    public decimal GSTPercent { get; set; }
+
+    public int ItemId { get; set; }
+
+    public string Color { get; set; }
 }
 
 namespace BubbyPlanetShowroom
@@ -54,6 +96,15 @@ namespace BubbyPlanetShowroom
         Button btnClearDraft;
         ListBox lstHoldBills;
         private List<HoldBill> holdBills = new List<HoldBill>();
+
+        private decimal rewardDiscountPercent = 0;
+        private bool rewardApplied = false;
+        private decimal rewardPurchaseAmount = 0;
+        private string lastRewardMobile = "";
+        private string lastRewardCheckMobile = "";
+        private decimal lastRewardCheckGrandTotal = -1;
+
+        private bool isLoadingHoldBill = false;
 
         private sealed class DraftScan
         {
@@ -86,6 +137,60 @@ namespace BubbyPlanetShowroom
         private decimal Round2(decimal value)
         {
             return Math.Round(value, 2, MidpointRounding.AwayFromZero);
+        }
+
+        private decimal ClampDiscount(decimal value)
+        {
+            if (value < 0)
+                return 0;
+            if (value > 100)
+                return 100;
+            return value;
+        }
+
+        private decimal GetCellDecimal(DataGridViewRow row, string columnName)
+        {
+            if (row?.Cells[columnName]?.Value == null)
+                return 0;
+
+            return decimal.TryParse(row.Cells[columnName].Value.ToString(), out decimal value)
+                ? value
+                : 0;
+        }
+
+        private decimal GetCellDecimal(DataGridViewRow row, int columnIndex)
+        {
+            if (row?.Cells[columnIndex]?.Value == null)
+                return 0;
+
+            return decimal.TryParse(row.Cells[columnIndex].Value.ToString(), out decimal value)
+                ? value
+                : 0;
+        }
+
+        private void SetDiscountBreakdown(
+            DataGridViewRow row,
+            decimal autoDiscount,
+            decimal manualDiscount,
+            decimal rewardDiscount)
+        {
+            autoDiscount = ClampDiscount(autoDiscount);
+            manualDiscount = Math.Max(0, manualDiscount);
+            rewardDiscount = Math.Max(0, rewardDiscount);
+
+            row.Cells["Auto_Discount"].Value = autoDiscount;
+            row.Cells["Manual_Discount"].Value = manualDiscount;
+            row.Cells["Reward_Discount"].Value = rewardDiscount;
+            row.Cells[1].Value = ClampDiscount(autoDiscount + manualDiscount + rewardDiscount);
+        }
+
+        private bool IsManualDiscountRow(DataGridViewRow row)
+        {
+            object manualVal = row?.Cells["Discount_Manual"]?.Value ?? 0;
+            if (manualVal is bool b)
+                return b;
+
+            return manualVal.ToString() == "1";
         }
 
         private void LstHoldBills_DoubleClick(object sender, EventArgs e)
@@ -122,9 +227,47 @@ namespace BubbyPlanetShowroom
                 bill.Items.Add(new HoldItem
                 {
                     ItemCode = row.Cells["Item_Code"].Value?.ToString(),
-                    Qty = Convert.ToInt32(row.Cells["Qty"].Value)
+
+                    ItemName = row.Cells[0].Value?.ToString(),
+
+                    Discount = GetCellDecimal(row, 1),
+
+                    AutoDiscount = GetCellDecimal(row, "Auto_Discount"),
+
+                    ManualDiscount = GetCellDecimal(row, "Manual_Discount"),
+
+                    RewardDiscount = GetCellDecimal(row, "Reward_Discount"),
+
+                    Size = row.Cells[2].Value?.ToString(),
+
+                    Price = Convert.ToDecimal(row.Cells[3].Value),
+
+                    Qty = Convert.ToInt32(row.Cells[4].Value),
+
+                    Gross = Convert.ToDecimal(row.Cells[5].Value),
+
+                    Taxable = Convert.ToDecimal(row.Cells[6].Value),
+
+                    GST = Convert.ToDecimal(row.Cells[7].Value),
+
+                    Net = Convert.ToDecimal(row.Cells[8].Value),
+
+                    GSTPercent = Convert.ToDecimal(row.Cells["GSTPercent"].Value ?? 0),
+
+                    ItemId = Convert.ToInt32(row.Cells["Item_Id"].Value ?? 0),
+
+                    Color = row.Cells["Color"].Value?.ToString() ?? "",
+
+                    DiscountManual = Convert.ToBoolean(row.Cells["Discount_Manual"].Value ?? false)
                 });
             }
+
+            bill.Mobile = txtMobile.Text.Trim();
+            bill.FirstName = txtName.Text.Trim();
+            bill.Surname = txtSurname.Text.Trim();
+
+            bill.RewardApplied = rewardApplied;
+            bill.RewardDiscountPercent = rewardDiscountPercent;
 
             holdBills.Add(bill);
 
@@ -165,31 +308,57 @@ namespace BubbyPlanetShowroom
             LoadHoldBill(holdBills[index]);
 
             holdBills.RemoveAt(index);
+
+            if (index >= 0 && index < lstHoldBills.Items.Count)
+                lstHoldBills.Items.RemoveAt(index);
         }
 
         private void LoadHoldBill(HoldBill bill)
         {
-            ResetBill();
-
-            foreach (var item in bill.Items)
+            try
             {
-                for (int i = 0; i < item.Qty; i++)
+                isLoadingHoldBill = true;
+
+                ResetBill();
+
+                txtMobile.Text = bill.Mobile;
+                txtName.Text = bill.FirstName;
+                txtSurname.Text = bill.Surname;
+
+                rewardApplied = bill.RewardApplied;
+                rewardDiscountPercent = bill.RewardDiscountPercent;
+
+                lastRewardMobile = bill.Mobile;
+
+                foreach (var item in bill.Items)
                 {
-                    LoadItem(item.ItemCode, out _);
+                    dgvRight.Rows.Add(
+                        item.ItemName,
+                        item.Discount,
+                        item.Size,
+                        item.Price,
+                        item.Qty,
+                        item.Gross,
+                        item.Taxable,
+                        item.GST,
+                        item.Net,
+                        item.GSTPercent,
+                        item.ItemCode,
+                        item.ItemId,
+                        item.Color,
+                        item.DiscountManual,
+                        item.AutoDiscount,
+                        item.ManualDiscount,
+                        item.RewardDiscount
+                    );
                 }
+
+                RecalculateTotals();
             }
-        }
-
-        private decimal GetTaxableUnitFromSelling(decimal sellingPriceInclTax, decimal gstPercent)
-        {
-            if (gstPercent < 0)
-                throw new Exception("Invalid GST percentage.");
-
-            decimal divisor = 1m + (gstPercent / 100m);
-            if (divisor <= 0)
-                throw new Exception("Invalid divisor while calculating taxable price.");
-
-            return Round2(sellingPriceInclTax / divisor);
+            finally
+            {
+                isLoadingHoldBill = false;
+            }
         }
 
         private void CalculateLineAmounts(
@@ -225,19 +394,6 @@ namespace BubbyPlanetShowroom
             InitializeUI();
             printDocument.PrintPage += PrintDocument_PrintPage;
             btnPrint.Click += BtnPrint_Click;
-            //this.Load += (s, e) => txtBarcode.Focus();
-
-            //this.KeyDown += (s, e) =>
-            //{
-            //    if (e.KeyCode == Keys.F4)
-            //        BtnReset_Click(null, null);
-
-            //    if (e.KeyCode == Keys.Delete)
-            //    {
-            //        if (dgvRight.CurrentRow != null)
-            //            dgvRight.Rows.Remove(dgvRight.CurrentRow);
-            //    }
-            //};
 
             this.Load += (s, e) =>
             {
@@ -318,7 +474,7 @@ namespace BubbyPlanetShowroom
             dgvRight.RowTemplate.Height = 32;
             dgvRight.ColumnHeadersHeight = 36;
             dgvRight.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-            dgvRight.ColumnCount = 8;
+            dgvRight.ColumnCount = 9;
             dgvRight.Columns[0].Name = "Item Name";
 
             dgvRight.Columns[1].Name = "Discount %";
@@ -331,22 +487,28 @@ namespace BubbyPlanetShowroom
             dgvRight.Columns[4].Name = "Qty";
             dgvRight.Columns[4].ReadOnly = false;
 
-            dgvRight.Columns[5].Name = "Subtotal";
+            dgvRight.Columns[5].Name = "Gross";
             dgvRight.Columns[5].ReadOnly = true;
 
-            dgvRight.Columns[6].Name = "GST";
+            dgvRight.Columns[6].Name = "Taxable";
             dgvRight.Columns[6].ReadOnly = true;
 
-            dgvRight.Columns[7].Name = "Total";
+            dgvRight.Columns[7].Name = "GST";
             dgvRight.Columns[7].ReadOnly = true;
-            dgvRight.Columns[0].FillWeight = 28;
-            dgvRight.Columns[1].FillWeight = 10;
-            dgvRight.Columns[2].FillWeight = 10;
-            dgvRight.Columns[3].FillWeight = 10;
-            dgvRight.Columns[4].FillWeight = 8;
-            dgvRight.Columns[5].FillWeight = 12;
-            dgvRight.Columns[6].FillWeight = 10;
-            dgvRight.Columns[7].FillWeight = 12;
+
+            dgvRight.Columns[8].Name = "Net";
+            dgvRight.Columns[8].ReadOnly = true;
+
+            dgvRight.Columns[0].FillWeight = 50;
+            dgvRight.Columns[1].FillWeight = 6;
+            dgvRight.Columns[2].FillWeight = 6;
+            dgvRight.Columns[3].FillWeight = 6;
+            dgvRight.Columns[4].FillWeight = 6;
+            dgvRight.Columns[5].FillWeight = 6; // Gross
+            dgvRight.Columns[6].FillWeight = 6; // Taxable
+            dgvRight.Columns[7].FillWeight = 6;  // GST
+            dgvRight.Columns[8].FillWeight = 10; // Net
+
             dgvRight.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9, FontStyle.Bold);
             dgvRight.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(15, 23, 42);
             dgvRight.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
@@ -372,6 +534,12 @@ namespace BubbyPlanetShowroom
             // hidden column to track if discount was manually edited by user (1=true,0=false)
             dgvRight.Columns.Add("Discount_Manual", "Discount_Manual");
             dgvRight.Columns["Discount_Manual"].Visible = false;
+            dgvRight.Columns.Add("Auto_Discount", "Auto_Discount");
+            dgvRight.Columns["Auto_Discount"].Visible = false;
+            dgvRight.Columns.Add("Manual_Discount", "Manual_Discount");
+            dgvRight.Columns["Manual_Discount"].Visible = false;
+            dgvRight.Columns.Add("Reward_Discount", "Reward_Discount");
+            dgvRight.Columns["Reward_Discount"].Visible = false;
 
             btnReset = new Button();
             btnReset.Text = "Reset Bill";
@@ -664,7 +832,7 @@ namespace BubbyPlanetShowroom
             btnViewHoldBills.BackColor = Color.SteelBlue;
             btnViewHoldBills.ForeColor = Color.White;
             btnViewHoldBills.FlatStyle = FlatStyle.Flat;
-            //btnViewHoldBills.Click += BtnViewHoldBills_Click;
+            btnViewHoldBills.Click += BtnResumeBill_Click;
 
             customerLayout.Controls.Add(lblHoldSection, 0, 10);
             customerLayout.Controls.Add(btnHoldBill, 0, 11);
@@ -694,6 +862,9 @@ namespace BubbyPlanetShowroom
 
         private void TxtMobile_TextChanged(object sender, EventArgs e)
         {
+            if (isLoadingHoldBill)
+                return;
+
             string original = txtMobile.Text;
             string digitsOnly = new string(original.Where(char.IsDigit).Take(10).ToArray());
 
@@ -704,17 +875,268 @@ namespace BubbyPlanetShowroom
                 txtMobile.SelectionStart = Math.Min(cursor, txtMobile.Text.Length);
             }
 
+            // Reward remove if mobile changed
+            string currentMobile = txtMobile.Text.Trim();
+
+            if (rewardApplied &&
+                !string.IsNullOrWhiteSpace(lastRewardMobile) &&
+                currentMobile != lastRewardMobile)
+            {
+                RemoveRewardDiscount();
+
+                lastRewardMobile = "";
+                lastRewardCheckMobile = "";
+                lastRewardCheckGrandTotal = -1;
+            }
+
             if (txtMobile.Text.Length == 10)
             {
                 LoadCustomerByMobile(txtMobile.Text.Trim());
+                RefreshAutoDiscountsForCurrentCustomer();
+
+                MaybeCheckRewardDiscount();
             }
             else
             {
                 lblCustomerStatus.Text = "";
                 currentCustomerId = 0;
                 currentCustomerIsStaff = false;
-                //ReapplyAutoDiscounts();
+
+                // Agar mobile clear kar diya gaya hai
+                if (rewardApplied)
+                {
+                    RemoveRewardDiscount();
+                    lastRewardMobile = "";
+                }
+
+                lastRewardCheckMobile = "";
+                lastRewardCheckGrandTotal = -1;
             }
+        }
+
+        private void MaybeCheckRewardDiscount()
+        {
+            if (isLoadingHoldBill || rewardApplied)
+                return;
+
+            string mobile = txtMobile.Text.Trim();
+            if (!IsValidMobile(mobile) || grandTotal <= 0)
+                return;
+
+            if (lastRewardCheckMobile == mobile &&
+                lastRewardCheckGrandTotal == grandTotal)
+            {
+                return;
+            }
+
+            lastRewardCheckMobile = mobile;
+            lastRewardCheckGrandTotal = grandTotal;
+            CheckRewardDiscount();
+        }
+
+        private void CheckRewardDiscount()
+        {
+            try
+            {
+                string mobile = txtMobile.Text.Trim();
+
+                using (MySqlConnection conn = DB.GetConnection())
+                {
+                    conn.Open();
+
+                    int customerId = 0;
+                    int rewardLastOrderId = 0;
+
+                    using (MySqlCommand customerCmd =
+                        new MySqlCommand(@"
+                SELECT
+                    id,
+                    IFNULL(reward_last_order_id,0) AS reward_last_order_id
+                FROM inv_customers
+                WHERE phone=@phone
+                LIMIT 1",
+                        conn))
+                    {
+                        customerCmd.Parameters.AddWithValue(
+                            "@phone",
+                            mobile);
+
+                        using (MySqlDataReader reader =
+                            customerCmd.ExecuteReader())
+                        {
+                            if (reader.Read())
+                            {
+                                customerId =
+                                    Convert.ToInt32(reader["id"]);
+
+                                rewardLastOrderId =
+                                    Convert.ToInt32(
+                                        reader["reward_last_order_id"]);
+                            }
+                        }
+                    }
+
+                    CalculateRewardDiscount(
+                        conn,
+                        customerId,
+                        rewardLastOrderId);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.ToString());
+            }
+        }
+
+        private void CalculateRewardDiscount(MySqlConnection conn, int customerId, int rewardLastOrderId)
+        {
+            if (customerId <= 0)
+                return;
+
+            MySqlCommand cmd =
+                new MySqlCommand(@"
+                    SELECT IFNULL(
+                        SUM(grand_total),
+                        0
+                    )
+                    FROM inv_orders
+                    WHERE customer_id=@cid
+                    AND id > @lastRewardOrderId",
+                conn);
+
+            cmd.Parameters.AddWithValue("@cid", customerId);
+
+            cmd.Parameters.AddWithValue("@lastRewardOrderId", rewardLastOrderId);
+
+            decimal previousPurchase = Convert.ToDecimal(cmd.ExecuteScalar());
+
+            // Previous Purchase + Current Bill
+            decimal eligiblePurchase = previousPurchase + grandTotal;
+
+            rewardPurchaseAmount = eligiblePurchase;
+
+            decimal rewardDiscount = GetRewardDiscount(conn, eligiblePurchase);
+
+            if (rewardDiscount <= 0)
+                return;
+
+            AskRewardRedemption(rewardDiscount, previousPurchase, grandTotal, eligiblePurchase);
+        }
+
+        private void RemoveRewardDiscount()
+        {
+            if (rewardDiscountPercent <= 0)
+                return;
+
+            foreach (DataGridViewRow row in dgvRight.Rows)
+            {
+                if (row.IsNewRow)
+                    continue;
+
+                if (IsManualDiscountRow(row))
+                {
+                    SetDiscountBreakdown(row, 0, GetCellDecimal(row, "Manual_Discount"), 0);
+                    continue;
+                }
+
+                SetDiscountBreakdown(
+                    row,
+                    GetCellDecimal(row, "Auto_Discount"),
+                    0,
+                    0);
+            }
+
+            rewardApplied = false;
+            rewardDiscountPercent = 0;
+            rewardPurchaseAmount = 0;
+            lastRewardCheckMobile = "";
+            lastRewardCheckGrandTotal = -1;
+
+            RecalculateRowAmounts();
+        }
+
+        private decimal GetRewardDiscount(
+    MySqlConnection conn,
+    decimal amount)
+        {
+            MySqlCommand cmd =
+                new MySqlCommand(@"
+        SELECT discount_percent
+        FROM inv_reward_discount_rules
+        WHERE min_purchase<=@amt
+        AND is_active=1
+        ORDER BY min_purchase DESC
+        LIMIT 1",
+                conn);
+
+            cmd.Parameters.AddWithValue(
+                "@amt",
+                amount);
+
+            object result =
+                cmd.ExecuteScalar();
+
+            if (result == null)
+                return 0;
+
+            return Convert.ToDecimal(result);
+        }
+
+        private void AskRewardRedemption(
+            decimal rewardDiscount,
+            decimal previousPurchase,
+            decimal currentBill,
+            decimal eligiblePurchase)
+        {
+            DialogResult dr =
+                MessageBox.Show(
+                $"🎉 Reward Available!\n\n" +
+                $"Previous Purchase : ₹{previousPurchase:N2}\n" +
+                $"Current Bill      : ₹{currentBill:N2}\n" +
+                $"-----------------------------\n" +
+                $"Eligible Amount   : ₹{eligiblePurchase:N2}\n\n" +
+                $"Reward Discount   : {rewardDiscount}%\n\n" +
+                $"Do you want to redeem this reward discount?",
+                "Reward Program",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Information);
+
+            if (dr != DialogResult.Yes)
+            {
+                rewardApplied = false;
+                rewardDiscountPercent = 0;
+                rewardPurchaseAmount = eligiblePurchase;
+                return;
+            }
+
+            rewardApplied = true;
+            rewardDiscountPercent = rewardDiscount;
+            lastRewardMobile = txtMobile.Text.Trim();
+
+            ApplyRewardDiscount();
+        }
+
+        private void ApplyRewardDiscount()
+        {
+            foreach (DataGridViewRow row in dgvRight.Rows)
+            {
+                if (row.IsNewRow)
+                    continue;
+
+                if (IsManualDiscountRow(row))
+                {
+                    SetDiscountBreakdown(row, 0, GetCellDecimal(row, "Manual_Discount"), 0);
+                    continue;
+                }
+
+                SetDiscountBreakdown(
+                    row,
+                    GetCellDecimal(row, "Auto_Discount"),
+                    0,
+                    rewardDiscountPercent);
+            }
+
+            RecalculateRowAmounts();
         }
 
         private void TxtMobile_Validating(object sender, CancelEventArgs e)
@@ -909,22 +1331,22 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 DB.EnsureAgeDiscountSchema(conn);
 
                 string query = @"
-SELECT
-    i.id,
-    i.item_code,
-    i.item_name,
-    i.size,
-    IFNULL(i.color,'') AS color,
-    IFNULL(i.main_category,'') AS main_category,
-    IFNULL(i.sub_category,'') AS sub_category,
-    IFNULL(i.gender,'') AS gender,
-    s.date_added AS stock_date_added,
-    i.selling_price,
-    i.GST
-FROM inv_items_master i
-LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
-WHERE i.item_code=@item_code
-LIMIT 1;";
+                SELECT
+                    i.id,
+                    i.item_code,
+                    i.item_name,
+                    i.size,
+                    IFNULL(i.color,'') AS color,
+                    IFNULL(i.main_category,'') AS main_category,
+                    IFNULL(i.sub_category,'') AS sub_category,
+                    IFNULL(i.gender,'') AS gender,
+                    s.date_added AS stock_date_added,
+                    i.selling_price,
+                    i.GST
+                FROM inv_items_master i
+                LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
+                WHERE i.item_code=@item_code
+                LIMIT 1;";
                 MySqlCommand cmd = new MySqlCommand(query, conn);
                 cmd.Parameters.AddWithValue("@item_code", barcode);
 
@@ -983,18 +1405,21 @@ LIMIT 1;";
                 catch { }
 
                 decimal defaultDiscount = GetAutoDiscountPercent(conn, itemcode ?? "", currentCustomerIsStaff);
+                decimal currentRewardDiscount = rewardApplied ? rewardDiscountPercent : 0;
                 //DebugDiscountDecision(itemcode ?? "", mainCategory ?? "", stockAddedOn, defaultDiscount);
                 int qty = 1;
 
                 CalculateLineAmounts(
                     finalPrice,
                     gstPercent,
-                    defaultDiscount,
+                    ClampDiscount(defaultDiscount + currentRewardDiscount),
                     qty,
                     out decimal subtotal,
                     out decimal gstAmount,
                     out decimal total
                 );
+
+                //decimal gross = finalPrice * qty;
 
                 // 🔥 STOCK CHECK
                 string stockQuery = "SELECT quantity FROM inv_stock WHERE item_code=@code LIMIT 1";
@@ -1055,23 +1480,27 @@ LIMIT 1;";
                 {
                     qty = existingQty + 1;
 
-                    bool isManual = false;
-                    object manualVal = existingRow.Cells["Discount_Manual"].Value ?? 0;
-                    if (manualVal is bool b)
-                        isManual = b;
-                    else
-                        isManual = manualVal.ToString() == "1";
+                    bool isManual = IsManualDiscountRow(existingRow);
 
                     decimal discount;
+
+                    decimal currentDiscount = GetCellDecimal(existingRow, 1);
+                    decimal autoDiscount = defaultDiscount;
+                    decimal manualDiscount = GetCellDecimal(existingRow, "Manual_Discount");
+                    decimal rowRewardDiscount = rewardApplied ? rewardDiscountPercent : 0;
+
                     if (!isManual)
                     {
-                        // If user didn't override, always re-evaluate auto discount using stock date vs today.
-                        discount = defaultDiscount;
-                        existingRow.Cells[1].Value = discount;
+                        discount = ClampDiscount(autoDiscount + rowRewardDiscount);
+                        SetDiscountBreakdown(existingRow, autoDiscount, 0, rowRewardDiscount);
                     }
                     else
                     {
-                        decimal.TryParse(existingRow.Cells[1].Value?.ToString(), out discount);
+                        if (manualDiscount <= 0)
+                            manualDiscount = currentDiscount;
+
+                        discount = ClampDiscount(manualDiscount);
+                        SetDiscountBreakdown(existingRow, 0, manualDiscount, 0);
                     }
 
                     CalculateLineAmounts(
@@ -1081,13 +1510,16 @@ LIMIT 1;";
                         qty,
                         out subtotal,
                         out gstAmount,
-                        out total
-                    );
+                        out total);
+
+                    decimal gross = Round2(finalPrice * qty);
 
                     existingRow.Cells[4].Value = qty;
-                    existingRow.Cells[5].Value = subtotal;
-                    existingRow.Cells[6].Value = gstAmount;
-                    existingRow.Cells[7].Value = total;
+                    existingRow.Cells[5].Value = gross;      // Gross
+                    existingRow.Cells[6].Value = subtotal;   // Taxable
+                    existingRow.Cells[7].Value = gstAmount;  // GST
+                    existingRow.Cells[8].Value = total;      // Net
+
                     existingRow.Cells["Item_Id"].Value = itemId;
                     existingRow.Cells["Color"].Value = color;
                 }
@@ -1100,23 +1532,28 @@ LIMIT 1;";
                         qty,
                         out subtotal,
                         out gstAmount,
-                        out total
-                    );
+                        out total);
+
+                    decimal gross = Round2(finalPrice * qty);
 
                     dgvRight.Rows.Add(
-                        name,               // 0
-                        defaultDiscount,    // 1 Discount
-                        size,               // 2
+                        name,               // 0 Item
+                        ClampDiscount(defaultDiscount + currentRewardDiscount), // 1 Discount %
+                        size,               // 2 Size
                         finalPrice,         // 3 Price
                         qty,                // 4 Qty
-                        subtotal,           // 5
-                        gstAmount,          // 6
-                        total,              // 7
+                        gross,              // 5 Gross
+                        subtotal,           // 6 Taxable
+                        gstAmount,          // 7 GST
+                        total,              // 8 Net
                         gstPercent,
                         itemcode,
                         itemId,
                         color,
-                        0 // Discount_Manual
+                        0, // Discount_Manual
+                        defaultDiscount,
+                        0,
+                        currentRewardDiscount
                     );
                 }
 
@@ -1152,24 +1589,24 @@ LIMIT 1;";
                 // 2) If tie, higher min_age_months wins (closest threshold)
                 // 3) If tie, higher discount_percent wins
                 using var cmd = new MySqlCommand(@"
-SELECT IFNULL(discount_percent,0)
-FROM inv_age_discount_rules
-WHERE is_active = 1
-  AND min_age_months <= @age
-  AND (item_code IS NULL OR TRIM(item_code) = '' OR LOWER(TRIM(item_code)) = LOWER(TRIM(@code)))
-  AND (main_category IS NULL OR TRIM(main_category) = '' OR LOWER(TRIM(main_category)) = LOWER(TRIM(@cat)))
-  AND (sub_category IS NULL OR TRIM(sub_category) = '' OR LOWER(TRIM(sub_category)) = LOWER(TRIM(@sub)))
-  AND (gender IS NULL OR TRIM(gender) = '' OR LOWER(TRIM(gender)) = LOWER(TRIM(@gender)))
-ORDER BY
-  (
-    CASE WHEN item_code IS NOT NULL AND TRIM(item_code) <> '' THEN 8 ELSE 0 END +
-    CASE WHEN main_category IS NOT NULL AND TRIM(main_category) <> '' THEN 4 ELSE 0 END +
-    CASE WHEN sub_category IS NOT NULL AND TRIM(sub_category) <> '' THEN 2 ELSE 0 END +
-    CASE WHEN gender IS NOT NULL AND TRIM(gender) <> '' THEN 1 ELSE 0 END
-  ) DESC,
-  min_age_months DESC,
-  discount_percent DESC
-LIMIT 1;", conn);
+                    SELECT IFNULL(discount_percent,0)
+                    FROM inv_age_discount_rules
+                    WHERE is_active = 1
+                      AND min_age_months <= @age
+                      AND (item_code IS NULL OR TRIM(item_code) = '' OR LOWER(TRIM(item_code)) = LOWER(TRIM(@code)))
+                      AND (main_category IS NULL OR TRIM(main_category) = '' OR LOWER(TRIM(main_category)) = LOWER(TRIM(@cat)))
+                      AND (sub_category IS NULL OR TRIM(sub_category) = '' OR LOWER(TRIM(sub_category)) = LOWER(TRIM(@sub)))
+                      AND (gender IS NULL OR TRIM(gender) = '' OR LOWER(TRIM(gender)) = LOWER(TRIM(@gender)))
+                    ORDER BY
+                      (
+                        CASE WHEN item_code IS NOT NULL AND TRIM(item_code) <> '' THEN 8 ELSE 0 END +
+                        CASE WHEN main_category IS NOT NULL AND TRIM(main_category) <> '' THEN 4 ELSE 0 END +
+                        CASE WHEN sub_category IS NOT NULL AND TRIM(sub_category) <> '' THEN 2 ELSE 0 END +
+                        CASE WHEN gender IS NOT NULL AND TRIM(gender) <> '' THEN 1 ELSE 0 END
+                      ) DESC,
+                      min_age_months DESC,
+                      discount_percent DESC
+                    LIMIT 1;", conn);
 
                 cmd.Parameters.AddWithValue("@age", ageMonths);
                 cmd.Parameters.AddWithValue("@code", (itemCode ?? "").Trim());
@@ -1199,38 +1636,38 @@ LIMIT 1;", conn);
             try
             {
                 using var cmd = new MySqlCommand(@"
-SELECT IFNULL(r.discount_percent,0)
-FROM inv_items_master i
-JOIN inv_stock s ON LOWER(TRIM(s.item_code)) = LOWER(TRIM(i.item_code))
-JOIN inv_age_discount_rules r ON r.is_active = 1
-WHERE LOWER(TRIM(i.item_code)) = LOWER(TRIM(@code))
-  AND r.min_age_months <= TIMESTAMPDIFF(MONTH, DATE(s.date_added), CURDATE())
-  AND (IFNULL(r.staff_only,0) = 0 OR @isStaff = 1)
-  AND (
-    (
-      r.item_code IS NOT NULL
-      AND TRIM(r.item_code) <> ''
-      AND LOWER(TRIM(r.item_code)) = LOWER(TRIM(i.item_code))
-    )
-    OR
-    (
-      (r.item_code IS NULL OR TRIM(r.item_code) = '')
-      AND (r.main_category IS NULL OR TRIM(r.main_category) = '' OR LOWER(TRIM(r.main_category)) = LOWER(TRIM(IFNULL(i.main_category,''))))
-      AND (r.sub_category IS NULL OR TRIM(r.sub_category) = '' OR LOWER(TRIM(r.sub_category)) = LOWER(TRIM(IFNULL(i.sub_category,''))))
-      AND (r.gender IS NULL OR TRIM(r.gender) = '' OR LOWER(TRIM(r.gender)) = LOWER(TRIM(IFNULL(i.gender,''))))
-    )
-  )
-ORDER BY
-  (
-    CASE WHEN IFNULL(r.staff_only,0) = 1 THEN 16 ELSE 0 END +
-    CASE WHEN r.item_code IS NOT NULL AND TRIM(r.item_code) <> '' THEN 8 ELSE 0 END +
-    CASE WHEN r.main_category IS NOT NULL AND TRIM(r.main_category) <> '' THEN 4 ELSE 0 END +
-    CASE WHEN r.sub_category IS NOT NULL AND TRIM(r.sub_category) <> '' THEN 2 ELSE 0 END +
-    CASE WHEN r.gender IS NOT NULL AND TRIM(r.gender) <> '' THEN 1 ELSE 0 END
-  ) DESC,
-  r.min_age_months DESC,
-  r.discount_percent DESC
-LIMIT 1;", conn);
+                SELECT IFNULL(r.discount_percent,0)
+                FROM inv_items_master i
+                JOIN inv_stock s ON LOWER(TRIM(s.item_code)) = LOWER(TRIM(i.item_code))
+                JOIN inv_age_discount_rules r ON r.is_active = 1
+                WHERE LOWER(TRIM(i.item_code)) = LOWER(TRIM(@code))
+                  AND r.min_age_months <= TIMESTAMPDIFF(MONTH, DATE(s.date_added), CURDATE())
+                  AND (IFNULL(r.staff_only,0) = 0 OR @isStaff = 1)
+                  AND (
+                    (
+                      r.item_code IS NOT NULL
+                      AND TRIM(r.item_code) <> ''
+                      AND LOWER(TRIM(r.item_code)) = LOWER(TRIM(i.item_code))
+                    )
+                    OR
+                    (
+                      (r.item_code IS NULL OR TRIM(r.item_code) = '')
+                      AND (r.main_category IS NULL OR TRIM(r.main_category) = '' OR LOWER(TRIM(r.main_category)) = LOWER(TRIM(IFNULL(i.main_category,''))))
+                      AND (r.sub_category IS NULL OR TRIM(r.sub_category) = '' OR LOWER(TRIM(r.sub_category)) = LOWER(TRIM(IFNULL(i.sub_category,''))))
+                      AND (r.gender IS NULL OR TRIM(r.gender) = '' OR LOWER(TRIM(r.gender)) = LOWER(TRIM(IFNULL(i.gender,''))))
+                    )
+                  )
+                ORDER BY
+                  (
+                    CASE WHEN IFNULL(r.staff_only,0) = 1 THEN 16 ELSE 0 END +
+                    CASE WHEN r.item_code IS NOT NULL AND TRIM(r.item_code) <> '' THEN 8 ELSE 0 END +
+                    CASE WHEN r.main_category IS NOT NULL AND TRIM(r.main_category) <> '' THEN 4 ELSE 0 END +
+                    CASE WHEN r.sub_category IS NOT NULL AND TRIM(r.sub_category) <> '' THEN 2 ELSE 0 END +
+                    CASE WHEN r.gender IS NOT NULL AND TRIM(r.gender) <> '' THEN 1 ELSE 0 END
+                  ) DESC,
+                  r.min_age_months DESC,
+                  r.discount_percent DESC
+                LIMIT 1;", conn);
 
                 cmd.Parameters.AddWithValue("@code", (itemCode ?? "").Trim());
                 cmd.Parameters.AddWithValue("@isStaff", isStaffCustomer ? 1 : 0);
@@ -1270,17 +1707,24 @@ LIMIT 1;", conn);
                 if (row.IsNewRow)
                     continue;
 
-                if (row.Cells[5].Value != null)
+                // Taxable = Cell[6]
+                // GST     = Cell[7]
+                // Net     = Cell[8]
+
+                if (row.Cells[6].Value != null)
                 {
-                    if (!decimal.TryParse(row.Cells[5].Value?.ToString(), out decimal taxable) ||
-                        !decimal.TryParse(row.Cells[6].Value?.ToString(), out decimal gst) ||
-                        !decimal.TryParse(row.Cells[7].Value?.ToString(), out decimal total))
+                    if (!decimal.TryParse(row.Cells[6].Value?.ToString(), out decimal taxable) ||
+                        !decimal.TryParse(row.Cells[7].Value?.ToString(), out decimal gst) ||
+                        !decimal.TryParse(row.Cells[8].Value?.ToString(), out decimal total))
                     {
                         if (!hasShownRecalcDataError)
                         {
-                            MessageBox.Show("Some row amount values are invalid. Please check Qty or rescan item.");
+                            MessageBox.Show(
+                                "Some row amount values are invalid. Please check Qty or rescan item.");
+
                             hasShownRecalcDataError = true;
                         }
+
                         continue;
                     }
 
@@ -1294,7 +1738,10 @@ LIMIT 1;", conn);
             totalgst = Round2(totalgst);
             grandTotal = Round2(grandTotal);
 
-            lblGrandTotal.Text = "Grand Total: " + grandTotal.ToString("0.00");
+            lblGrandTotal.Text =
+                "Grand Total: " + grandTotal.ToString("0.00");
+
+            MaybeCheckRewardDiscount();
         }
 
 
@@ -1396,6 +1843,7 @@ LIMIT 1;", conn);
             }
 
             LoadCustomerByMobile(mobile);
+            RefreshAutoDiscountsForCurrentCustomer();
         }
 
 
@@ -1440,8 +1888,6 @@ LIMIT 1;", conn);
                     lblCustomerStatus.Text = currentCustomerIsStaff ? "Staff" : "New Customer";
                     lblCustomerStatus.ForeColor = currentCustomerIsStaff ? Color.Green : Color.DarkOrange;
                 }
-
-                //ReapplyAutoDiscounts(conn);
             }
         }
 
@@ -1465,68 +1911,42 @@ LIMIT 1;", conn);
             }
         }
 
-        private void ReapplyAutoDiscounts(MySqlConnection existingConnection = null)
+        private void RefreshAutoDiscountsForCurrentCustomer()
         {
-            if (dgvRight == null || dgvRight.Rows.Count == 0)
+            if (dgvRight.Rows.Count == 0)
                 return;
-
-            bool ownsConnection = existingConnection == null;
-            MySqlConnection conn = existingConnection ?? DB.GetConnection();
 
             try
             {
-                if (ownsConnection)
-                    conn.Open();
+                using MySqlConnection conn = DB.GetConnection();
+                conn.Open();
+                DB.EnsureAgeDiscountSchema(conn);
 
                 foreach (DataGridViewRow row in dgvRight.Rows)
                 {
                     if (row.IsNewRow)
                         continue;
 
-                    object manualVal = row.Cells["Discount_Manual"].Value ?? 0;
-                    bool isManual = manualVal is bool b ? b : manualVal.ToString() == "1";
-                    if (isManual)
-                        continue;
-
                     string itemCode = row.Cells["Item_Code"].Value?.ToString() ?? "";
                     if (string.IsNullOrWhiteSpace(itemCode))
                         continue;
 
-                    if (!decimal.TryParse(row.Cells[3].Value?.ToString(), out decimal price) ||
-                        !decimal.TryParse(row.Cells["GSTPercent"].Value?.ToString(), out decimal gstPercent) ||
-                        !int.TryParse(row.Cells[4].Value?.ToString(), out int qty))
-                    {
-                        continue;
-                    }
+                    bool isManual = IsManualDiscountRow(row);
 
-                    decimal discount = GetAutoDiscountPercent(conn, itemCode, currentCustomerIsStaff);
-                    row.Cells[1].Value = discount;
+                    decimal autoDiscount = GetAutoDiscountPercent(conn, itemCode, currentCustomerIsStaff);
+                    decimal manualDiscount = isManual ? GetCellDecimal(row, "Manual_Discount") : 0;
+                    decimal rowRewardDiscount = rewardApplied ? rewardDiscountPercent : GetCellDecimal(row, "Reward_Discount");
 
-                    CalculateLineAmounts(
-                        price,
-                        gstPercent,
-                        discount,
-                        qty,
-                        out decimal subtotal,
-                        out decimal gstAmount,
-                        out decimal total
-                    );
-
-                    row.Cells[5].Value = subtotal;
-                    row.Cells[6].Value = gstAmount;
-                    row.Cells[7].Value = total;
+                    if (isManual)
+                        SetDiscountBreakdown(row, 0, manualDiscount, 0);
+                    else
+                        SetDiscountBreakdown(row, autoDiscount, 0, rowRewardDiscount);
                 }
 
-                RecalculateTotals();
+                RecalculateRowAmounts();
             }
             catch
             {
-                // Do not block customer lookup if discount refresh fails.
-            }
-            finally
-            {
-                if (ownsConnection)
-                    conn.Dispose();
             }
         }
 
@@ -1662,6 +2082,7 @@ LIMIT 1;", conn);
         private void PrintDocument_PrintPage(object sender, PrintPageEventArgs e)
         {
             Graphics g = e.Graphics;
+            int gatewayQuantity = 0;
 
             // ✅ Fix printer margin issue
             g.TranslateTransform(-e.PageSettings.HardMarginX, -e.PageSettings.HardMarginY);
@@ -1732,9 +2153,10 @@ LIMIT 1;", conn);
 
                     if (!decimal.TryParse(dgvRight.Rows[i].Cells[3].Value?.ToString(), out decimal priceVal) ||
                      !int.TryParse(dgvRight.Rows[i].Cells[4].Value?.ToString(), out int qtyVal) ||
-                     !decimal.TryParse(dgvRight.Rows[i].Cells[5].Value?.ToString(), out decimal subtotalVal) ||
-                     !decimal.TryParse(dgvRight.Rows[i].Cells[6].Value?.ToString(), out decimal gstVal) ||
-                     !decimal.TryParse(dgvRight.Rows[i].Cells[7].Value?.ToString(), out decimal totalVal) ||
+                     !decimal.TryParse(dgvRight.Rows[i].Cells[5].Value?.ToString(), out decimal grossVal) ||
+                     !decimal.TryParse(dgvRight.Rows[i].Cells[6].Value?.ToString(), out decimal subtotalVal) ||
+                     !decimal.TryParse(dgvRight.Rows[i].Cells[7].Value?.ToString(), out decimal gstVal) ||
+                     !decimal.TryParse(dgvRight.Rows[i].Cells[8].Value?.ToString(), out decimal totalVal) ||
                      !decimal.TryParse(dgvRight.Rows[i].Cells["GSTPercent"].Value?.ToString(), out decimal gstPercent))
                     {
                         MessageBox.Show($"Invalid amount data in row {i + 1}. Please check bill before printing.");
@@ -1752,24 +2174,47 @@ LIMIT 1;", conn);
                     if (discountAmountInclTax < 0)
                         discountAmountInclTax = 0;
 
+                    gatewayQuantity = gatewayQuantity + qtyVal;
+
                     g.DrawString($"Item {itemNumber}: {name}", boldFont, Brushes.Black, 5, y);
                     y += 13;
 
-                    g.DrawString($"Code:{itemCode}  Size:{size}", normalFont, Brushes.Black, 5, y);
+                    g.DrawString($"Code: {itemCode}  Size : {size}", normalFont, Brushes.Black, 4, y);
                     y += 13;
 
-                    g.DrawString($"Price:{priceVal:0.00}  Qty:{qtyVal}  GST%:{gstPercent:0.##}", normalFont, Brushes.Black, 5, y);
+                    //if (!string.IsNullOrWhiteSpace(size))
+                    //{
+                    //    g.DrawString($"Size : {size}", normalFont, Brushes.Black, 5, y);
+                    //    y += 13;
+                    //}
+
+                    g.DrawString($"Price: {priceVal:0.00}  Qty: {qtyVal}  Gross: {grossVal:0.00}",normalFont,Brushes.Black,4,y);
                     y += 13;
 
-                    g.DrawString($"Line:{originalTotalInclTax:0.00}  Disc:{discountPercentVal:0.##}% (-{discountAmountInclTax:0.00})", normalFont, Brushes.Black, 5, y);
+                    //g.DrawString($"Gross : {grossVal:0.00}",normalFont,Brushes.Black,5,y);
+                    //y += 13;
+
+                    g.DrawString($"Discount : {discountPercentVal:0.##}% (-{discountAmountInclTax:0.00})",normalFont,Brushes.Black,4,y);
                     y += 13;
 
-                    g.DrawString($"Sub:{subtotalVal:0.00}  GST:{gstVal:0.00}  Net:{totalVal:0.00}", normalFont, Brushes.Black, 5, y);
-                    y += 22;
+                    g.DrawString($"Taxable: {subtotalVal:0.00}  GST: {gstVal:0.00}",normalFont,Brushes.Black,4,y);
+                    y += 13;
+
+                    //g.DrawString($"GST     : {gstVal:0.00}",normalFont,Brushes.Black,5,y);
+                    //y += 13;
+
+                    g.DrawString($"Net: {totalVal:0.00}",boldFont,Brushes.Black,6,y);
+                    y += 15;
+
+                    g.DrawString("--------------------------------",normalFont,Brushes.Black,5,y);
+                    y += 15;
 
                     itemNumber++;
                 }
             }
+
+            g.DrawString("Gate check quantity: " + gatewayQuantity.ToString(""), totalFont, Brushes.Black, 5, y);
+            y += 15;
 
             // ===== Footer =====
             g.DrawString(new string('-', 48), normalFont, Brushes.Black, 5, y);
@@ -1846,40 +2291,6 @@ LIMIT 1;", conn);
 
             e.HasMorePages = false;
         }
-        private bool SaveSale()
-        {
-            if (dgvRight.Rows.Count == 0)
-            {
-                MessageBox.Show("No items to save.");
-                return false;
-            }
-
-            using (MySqlConnection conn = DB.GetConnection())
-            {
-                conn.Open();
-                EnsureOrderPaymentColumns(conn);
-                MySqlTransaction transaction = conn.BeginTransaction();
-
-                try
-                {
-                    int customerId = GetOrCreateCustomer(conn, transaction);
-                    int orderId = InsertOrder(conn, transaction, customerId);
-                    lastOrderId = orderId; // 👈 important
-                    InsertOrderDetails(conn, transaction, orderId);
-
-                    transaction.Commit();
-
-                    MessageBox.Show("Order Saved Successfully ✅\nOrder ID: " + orderId);
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    try { transaction.Rollback(); } catch { }
-                    MessageBox.Show("Error Saving Sale: " + ex.Message);
-                    return false;
-                }
-            }
-        }
 
         private bool SaveSaleAndPrint()
         {
@@ -1922,9 +2333,29 @@ LIMIT 1;", conn);
                     int orderId = InsertOrder(conn, transaction, customerId);
                     lastOrderId = orderId;
                     InsertOrderDetails(conn, transaction, orderId);
+                    if (rewardApplied)
+                    {
+                        MySqlCommand rewardCmd =
+                            new MySqlCommand(@"
+                            UPDATE inv_customers
+                            SET reward_last_order_id=@orderId
+                            WHERE id=@customerId",
+                            conn,
+                            transaction);
+
+                        rewardCmd.Parameters.AddWithValue("@orderId", orderId);
+                        rewardCmd.Parameters.AddWithValue("@customerId", customerId);
+                        rewardCmd.ExecuteNonQuery();
+                    }
 
                     // Print first; commit only if print succeeds
-                    printDocument.Print();
+
+                    PrintPreviewDialog preview = new PrintPreviewDialog();
+                    preview.Document = printDocument;
+                    preview.Width = 1200;
+                    preview.Height = 800;
+                    preview.ShowDialog();
+                    //printDocument.Print();
 
                     transaction.Commit();
                     MessageBox.Show("Order Saved Successfully ✅\nOrder ID: " + orderId);
@@ -2007,38 +2438,6 @@ LIMIT 1;", conn);
             return true;
         }
 
-        // Note: We intentionally don't attempt "cleanup delete" on print failure.
-        // The order is created inside a transaction and will be rolled back if printing fails.
-
-        //private int GetOrCreateCustomer(MySqlConnection conn, MySqlTransaction transaction)
-        //{
-        //    if (string.IsNullOrWhiteSpace(txtMobile.Text))
-        //        throw new Exception("Customer mobile required");
-
-        //    MySqlCommand checkCmd = new MySqlCommand(
-        //        "SELECT id FROM inv_customers WHERE phone=@phone LIMIT 1",
-        //        conn, transaction);
-
-        //    checkCmd.Parameters.AddWithValue("@phone", txtMobile.Text.Trim());
-
-        //    object result = checkCmd.ExecuteScalar();
-
-        //    if (result != null)
-        //        return Convert.ToInt32(result);
-
-        //    MySqlCommand insertCmd = new MySqlCommand(
-        //        @"INSERT INTO inv_customers(first_name,sur_name,phone,status,date_added)
-        //  VALUES(@name,@surname,@phone,1,NOW());
-        //  SELECT LAST_INSERT_ID();",
-        //        conn, transaction);
-
-        //    insertCmd.Parameters.AddWithValue("@name", txtName.Text.Trim());
-        //    insertCmd.Parameters.AddWithValue("@surname", txtSurname.Text.Trim());
-        //    insertCmd.Parameters.AddWithValue("@phone", txtMobile.Text.Trim());
-
-        //    return Convert.ToInt32(insertCmd.ExecuteScalar());
-        //}
-
         private int GetOrCreateCustomer(MySqlConnection conn, MySqlTransaction transaction)
         {
             // 👉 WALK-IN CUSTOMER (no mobile)
@@ -2074,191 +2473,299 @@ LIMIT 1;", conn);
 
             // 👉 NEW CUSTOMER INSERT
             MySqlCommand insertCmd = new MySqlCommand(
-                @"INSERT INTO inv_customers(first_name,sur_name,phone,status,date_added)
-          VALUES(@name,@surname,@phone,1,NOW());
-          SELECT LAST_INSERT_ID();",
-                conn, transaction);
+            @"INSERT INTO inv_customers
+                (
+                    first_name,
+                    sur_name,
+                    phone,
+                    status,
+                    reward_last_order_id,
+                    date_added
+                )
+                VALUES
+                (
+                    @name,
+                    @surname,
+                    @phone,
+                    1,
+                    0,
+                    NOW()
+                );
+
+                SELECT LAST_INSERT_ID();",
+            conn,
+            transaction);
 
             insertCmd.Parameters.AddWithValue("@name", txtName.Text.Trim());
             insertCmd.Parameters.AddWithValue("@surname", txtSurname.Text.Trim());
             insertCmd.Parameters.AddWithValue("@phone", txtMobile.Text.Trim());
 
             object insertedCustomerId = insertCmd.ExecuteScalar();
-            if (insertedCustomerId == null || !int.TryParse(insertedCustomerId.ToString(), out int newCustomerId))
+
+            if (insertedCustomerId == null ||
+                !int.TryParse(insertedCustomerId.ToString(), out int newCustomerId))
+            {
                 throw new Exception("Failed to create customer id.");
+            }
+
             return newCustomerId;
         }
 
-        private int InsertOrder(MySqlConnection conn, MySqlTransaction transaction, int customerId)
+        private int InsertOrder(
+    MySqlConnection conn,
+    MySqlTransaction transaction,
+    int customerId)
         {
-            decimal subtotal = 0;
-            decimal tax = 0;
-            decimal totalDiscount = 0;
+            decimal subtotal = 0;      // Taxable Total
+            decimal tax = 0;           // GST Total
+            decimal totalDiscount = 0; // Discount Total
 
             foreach (DataGridViewRow row in dgvRight.Rows)
             {
                 if (row.IsNewRow)
                     continue;
 
-                if (row.Cells[5].Value != null)
+                if (!decimal.TryParse(
+                        row.Cells[5].Value?.ToString(),
+                        out decimal gross))
                 {
-                    if (!decimal.TryParse(row.Cells[5].Value?.ToString(), out decimal rowSub) ||
-                        !decimal.TryParse(row.Cells[6].Value?.ToString(), out decimal rowTax))
-                    {
-                        throw new Exception("Invalid row amount found while saving order.");
-                    }
-
-                    subtotal += rowSub;
-                    tax += rowTax;
-
-                    // 🔥 Discount Calculation
-                    decimal.TryParse(
-                        row.Cells[1].Value?.ToString(),
-                        out decimal discountPercent
-                    );
-
-                    decimal.TryParse(
-                        row.Cells[3].Value?.ToString(),
-                        out decimal sellingPrice
-                    );
-
-                    int.TryParse(
-                        row.Cells[4].Value?.ToString(),
-                        out int qty
-                    );
-
-                    decimal originalTotal = sellingPrice * qty;
-
-                    decimal discountAmount =
-                        (discountPercent / 100m) * originalTotal;
-
-                    totalDiscount += discountAmount;
+                    throw new Exception(
+                        "Invalid gross amount found while saving order.");
                 }
+
+                if (!decimal.TryParse(
+                        row.Cells[6].Value?.ToString(),
+                        out decimal taxable))
+                {
+                    throw new Exception(
+                        "Invalid taxable amount found while saving order.");
+                }
+
+                if (!decimal.TryParse(
+                        row.Cells[7].Value?.ToString(),
+                        out decimal gst))
+                {
+                    throw new Exception(
+                        "Invalid GST amount found while saving order.");
+                }
+
+                subtotal += taxable;
+                tax += gst;
+
+                decimal discountAmount =
+                    Round2(gross - (taxable + gst));
+
+                totalDiscount += discountAmount;
             }
 
             subtotal = Round2(subtotal);
             tax = Round2(tax);
             totalDiscount = Round2(totalDiscount);
 
-            MySqlCommand cmd = new MySqlCommand(
-            @"INSERT INTO inv_orders
-    (
-        customer_id,
-        subtotal,
-        total_discount,
-        total_tax,
-        grand_total,
-        payment_method,
-        created_by,
-        date_added
-    )
-    VALUES
-    (
-        @cid,
-        @sub,
-        @discount,
-        @tax,
-        @grand,
-        @pmethod,
-        @createdBy,
-        NOW()
-    );
-    SELECT LAST_INSERT_ID();",
-            conn,
-            transaction);
+            using MySqlCommand cmd = new MySqlCommand(@"
+        INSERT INTO inv_orders
+        (
+            customer_id,
+            subtotal,
+            total_discount,
+            total_tax,
+            grand_total,
+            payment_method,
+            created_by,
+            date_added
+        )
+        VALUES
+        (
+            @cid,
+            @sub,
+            @discount,
+            @tax,
+            @grand,
+            @pmethod,
+            @createdBy,
+            NOW()
+        );
+
+        SELECT LAST_INSERT_ID();",
+                conn,
+                transaction);
 
             cmd.Parameters.AddWithValue("@cid", customerId);
-            cmd.Parameters.AddWithValue("@sub", subtotal);
-            cmd.Parameters.AddWithValue("@discount", totalDiscount);
-            cmd.Parameters.AddWithValue("@tax", tax);
-            cmd.Parameters.AddWithValue("@grand", grandTotal);
-            cmd.Parameters.AddWithValue("@pmethod", (cmbPaymentMethod?.Text ?? "Cash").Trim());
-            cmd.Parameters.AddWithValue("@createdBy", string.IsNullOrWhiteSpace(LoginForm.LoggedInUser)? "Unknown" : LoginForm.LoggedInUser);
 
-            object orderIdObj = cmd.ExecuteScalar();
+            cmd.Parameters.AddWithValue("@sub", subtotal);
+
+            cmd.Parameters.AddWithValue(
+                "@discount",
+                totalDiscount);
+
+            cmd.Parameters.AddWithValue("@tax", tax);
+
+            cmd.Parameters.AddWithValue(
+                "@grand",
+                grandTotal);
+
+            cmd.Parameters.AddWithValue(
+                "@pmethod",
+                (cmbPaymentMethod?.Text ?? "Cash").Trim());
+
+            cmd.Parameters.AddWithValue(
+                "@createdBy",
+                string.IsNullOrWhiteSpace(
+                    LoginForm.LoggedInUser)
+                        ? "Unknown"
+                        : LoginForm.LoggedInUser);
+
+            object orderIdObj =
+                cmd.ExecuteScalar();
 
             if (orderIdObj == null ||
-                !int.TryParse(orderIdObj.ToString(), out int orderId))
+                !int.TryParse(
+                    orderIdObj.ToString(),
+                    out int orderId))
             {
-                throw new Exception("Failed to create order id.");
+                throw new Exception(
+                    "Failed to create order id.");
             }
 
             return orderId;
         }
 
-        private void InsertOrderDetails(MySqlConnection conn, MySqlTransaction transaction, int orderId)
+        private void InsertOrderDetails(
+    MySqlConnection conn,
+    MySqlTransaction transaction,
+    int orderId)
         {
             foreach (DataGridViewRow row in dgvRight.Rows)
             {
                 if (row.IsNewRow || row.Cells[0].Value == null)
                     continue;
 
-                if (row.Cells[0].Value != null)
+                string itemCode =
+                    row.Cells["Item_Code"].Value?.ToString() ?? "";
+
+                if (string.IsNullOrWhiteSpace(itemCode))
+                    throw new Exception(
+                        "Item code missing while saving order details.");
+
+                object itemIdObj = row.Cells["Item_Id"].Value;
+
+                if (itemIdObj == null ||
+                    string.IsNullOrWhiteSpace(itemIdObj.ToString()))
                 {
-                    string itemCode = row.Cells["Item_Code"].Value?.ToString() ?? "";
-                    if (string.IsNullOrWhiteSpace(itemCode))
-                        throw new Exception("Item code missing while saving order details.");
-
-                    object itemIdObj = row.Cells["Item_Id"].Value;
-                    if (itemIdObj == null || string.IsNullOrWhiteSpace(itemIdObj.ToString()))
-                        throw new Exception($"Item id missing for item code: {itemCode}");
-
-                    if (!int.TryParse(itemIdObj.ToString(), out int itemId))
-                        throw new Exception($"Invalid item id for item code: {itemCode}");
-
-                    if (!int.TryParse(row.Cells[4].Value?.ToString(), out int qty) || qty <= 0)
-                        throw new Exception($"Invalid quantity for item code: {itemCode}");
-
-                    decimal.TryParse(
-                        row.Cells[1].Value?.ToString(),
-                        out decimal discountPercent
-                    );
-
-                    if (!decimal.TryParse(row.Cells[3].Value?.ToString(), out decimal price) ||
-                        !decimal.TryParse(row.Cells[5].Value?.ToString(), out decimal subtotal) ||
-                        !decimal.TryParse(row.Cells[6].Value?.ToString(), out decimal tax) ||
-                        !decimal.TryParse(row.Cells[7].Value?.ToString(), out decimal total))
-                        throw new Exception($"Invalid amount values for item code: {itemCode}");
-
-                    MySqlCommand cmd = new MySqlCommand(@"
-                INSERT INTO inv_order_details
-                (
-                    order_id,
-                    item_id,
-                    qty,
-                    price,
-                    subtotal,
-                    discount_percent,
-                    tax,
-                    total
-                )
-                VALUES
-                (
-                    @oid,
-                    @iid,
-                    @qty,
-                    @price,
-                    @sub,
-                    @discountPercent,
-                    @tax,
-                    @total
-                )", conn, transaction);
-
-                    cmd.Parameters.AddWithValue("@oid", orderId);
-                    cmd.Parameters.AddWithValue("@iid", itemId);
-                    cmd.Parameters.AddWithValue("@qty", qty);
-                    cmd.Parameters.AddWithValue("@price", price);
-                    cmd.Parameters.AddWithValue("@sub", subtotal);
-                    cmd.Parameters.AddWithValue("@discountPercent", discountPercent);
-                    cmd.Parameters.AddWithValue("@tax", tax);
-                    cmd.Parameters.AddWithValue("@total", total);
-
-                    cmd.ExecuteNonQuery();
-
-                    UpdateStock(conn, transaction, itemCode, qty);
+                    throw new Exception(
+                        $"Item id missing for item code: {itemCode}");
                 }
+
+                if (!int.TryParse(itemIdObj.ToString(), out int itemId))
+                {
+                    throw new Exception(
+                        $"Invalid item id for item code: {itemCode}");
+                }
+
+                if (!int.TryParse(
+                        row.Cells[4].Value?.ToString(),
+                        out int qty) ||
+                    qty <= 0)
+                {
+                    throw new Exception(
+                        $"Invalid quantity for item code: {itemCode}");
+                }
+
+                decimal.TryParse(
+                    row.Cells[1].Value?.ToString(),
+                    out decimal discountPercent);
+
+                if (!decimal.TryParse(
+                        row.Cells[3].Value?.ToString(),
+                        out decimal price) ||
+
+                    !decimal.TryParse(
+                        row.Cells[5].Value?.ToString(),
+                        out decimal gross) ||
+
+                    !decimal.TryParse(
+                        row.Cells[6].Value?.ToString(),
+                        out decimal taxable) ||
+
+                    !decimal.TryParse(
+                        row.Cells[7].Value?.ToString(),
+                        out decimal gst) ||
+
+                    !decimal.TryParse(
+                        row.Cells[8].Value?.ToString(),
+                        out decimal net))
+                {
+                    throw new Exception(
+                        $"Invalid amount values for item code: {itemCode}");
+                }
+
+                decimal discountAmount =
+                    Round2(gross - (taxable + gst));
+
+                using MySqlCommand cmd = new MySqlCommand(@"
+            INSERT INTO inv_order_details
+            (
+                order_id,
+                item_id,
+                qty,
+                selling_price,
+                gross_amount,
+                discount_percent,
+                discount_amount,
+                taxable_amount,
+                gst_amount,
+                net_amount
+            )
+            VALUES
+            (
+                @oid,
+                @iid,
+                @qty,
+                @price,
+                @gross,
+                @discountPercent,
+                @discountAmount,
+                @taxable,
+                @gst,
+                @net
+            )",
+                    conn,
+                    transaction);
+
+                cmd.Parameters.AddWithValue("@oid", orderId);
+                cmd.Parameters.AddWithValue("@iid", itemId);
+                cmd.Parameters.AddWithValue("@qty", qty);
+                cmd.Parameters.AddWithValue("@price", price);
+                cmd.Parameters.AddWithValue("@gross", gross);
+
+                cmd.Parameters.AddWithValue("@discountPercent", discountPercent);
+
+                cmd.Parameters.AddWithValue(
+                    "@discountAmount",
+                    discountAmount);
+
+                cmd.Parameters.AddWithValue(
+                    "@taxable",
+                    taxable);
+
+                cmd.Parameters.AddWithValue(
+                    "@gst",
+                    gst);
+
+                cmd.Parameters.AddWithValue(
+                    "@net",
+                    net);
+
+                cmd.ExecuteNonQuery();
+
+                UpdateStock(
+                    conn,
+                    transaction,
+                    itemCode,
+                    qty);
             }
         }
+
         private void UpdateStock(MySqlConnection conn, MySqlTransaction transaction, string itemCode, int qty)
         {
             string query = @"UPDATE inv_stock 
@@ -2312,6 +2819,8 @@ LIMIT 1;", conn);
                     MessageBox.Show("Item code missing in this row. Please remove and rescan.");
                     return;
                 }
+
+                decimal refreshedAutoDiscount = GetCellDecimal(row, "Auto_Discount");
 
                 // 🔥 STOCK CHECK (same as before)
                 using (MySqlConnection conn = DB.GetConnection())
@@ -2367,23 +2876,28 @@ LIMIT 1;", conn);
                         );
 
                         CalculateLineAmounts(
-                            Nprice,
-                            NgstPercent,
-                            Ndiscount,
-                            newQty,
-                            out decimal Nsubtotal,
-                            out decimal NgstAmount,
-                            out decimal Ntotal
-                        );
+                                            Nprice,
+                                            NgstPercent,
+                                            Ndiscount,
+                                            newQty,
+                                            out decimal Nsubtotal,
+                                            out decimal NgstAmount,
+                                            out decimal Ntotal
+                                        );
 
-                        row.Cells[5].Value = Nsubtotal;
-                        row.Cells[6].Value = NgstAmount;
-                        row.Cells[7].Value = Ntotal;
+                        decimal Ngross = Round2(Nprice * newQty);
+
+                        row.Cells[5].Value = Ngross;      // Gross
+                        row.Cells[6].Value = Nsubtotal;   // Taxable
+                        row.Cells[7].Value = NgstAmount;  // GST
+                        row.Cells[8].Value = Ntotal;      // Net
 
                         RecalculateTotals();
 
                         return;
                     }
+
+                    refreshedAutoDiscount = GetAutoDiscountPercent(conn, itemCode, currentCustomerIsStaff);
                 }
 
                 // 🔥 ✅ CORRECT CALCULATION (same as LoadItem)
@@ -2394,17 +2908,27 @@ LIMIT 1;", conn);
                     return;
                 }
 
-                decimal discount = 0;
-
-                decimal.TryParse(
-                    row.Cells[1].Value?.ToString(),
-                    out discount
-                );
+                decimal discount = GetCellDecimal(row, 1);
+                decimal rewardDiscount = rewardApplied ? rewardDiscountPercent : GetCellDecimal(row, "Reward_Discount");
 
                 // Mark discount as manual edit if user edited the Discount % column.
                 if (e.ColumnIndex == 1)
                 {
                     row.Cells["Discount_Manual"].Value = 1;
+                    decimal manualDiscount = ClampDiscount(discount);
+                    SetDiscountBreakdown(row, 0, manualDiscount, 0);
+                    discount = GetCellDecimal(row, 1);
+                }
+                else
+                {
+                    bool isManual = IsManualDiscountRow(row);
+
+                    decimal manualDiscount = isManual ? GetCellDecimal(row, "Manual_Discount") : 0;
+                    if (isManual)
+                        SetDiscountBreakdown(row, 0, manualDiscount, 0);
+                    else
+                        SetDiscountBreakdown(row, refreshedAutoDiscount, 0, rewardDiscount);
+                    discount = GetCellDecimal(row, 1);
                 }
 
                 CalculateLineAmounts(
@@ -2417,9 +2941,12 @@ LIMIT 1;", conn);
                     out decimal total
                 );
 
-                row.Cells[5].Value = subtotal;
-                row.Cells[6].Value = gstAmount;
-                row.Cells[7].Value = total;
+                decimal gross = Round2(price * qty);
+
+                row.Cells[5].Value = gross;
+                row.Cells[6].Value = subtotal;
+                row.Cells[7].Value = gstAmount;
+                row.Cells[8].Value = total;
 
                 RecalculateTotals();
             }
@@ -2453,6 +2980,12 @@ LIMIT 1;", conn);
 
             currentCustomerId = 0;
             currentCustomerIsStaff = false;
+            rewardApplied = false;
+            rewardDiscountPercent = 0;
+            rewardPurchaseAmount = 0;
+            lastRewardMobile = "";
+            lastRewardCheckMobile = "";
+            lastRewardCheckGrandTotal = -1;
 
             txtBarcode.Focus();
         }
@@ -2475,6 +3008,13 @@ LIMIT 1;", conn);
 
             currentCustomerId = 0;
             currentCustomerIsStaff = false;
+
+            rewardApplied = false;
+            rewardDiscountPercent = 0;
+            rewardPurchaseAmount = 0;
+            lastRewardMobile = "";
+            lastRewardCheckMobile = "";
+            lastRewardCheckGrandTotal = -1;
 
             txtBarcode.Focus();
         }
@@ -2548,24 +3088,31 @@ LIMIT 1;", conn);
                 }
 
                 if (!decimal.TryParse(row.Cells[3].Value?.ToString(), out decimal price) ||
-                    !decimal.TryParse(row.Cells[5].Value?.ToString(), out decimal subtotal) ||
-                    !decimal.TryParse(row.Cells[6].Value?.ToString(), out decimal gst) ||
-                    !decimal.TryParse(row.Cells[7].Value?.ToString(), out decimal total))
+                    !decimal.TryParse(row.Cells[5].Value?.ToString(), out decimal gross) ||
+                    !decimal.TryParse(row.Cells[6].Value?.ToString(), out decimal taxable) ||
+                    !decimal.TryParse(row.Cells[7].Value?.ToString(), out decimal gst) ||
+                    !decimal.TryParse(row.Cells[8].Value?.ToString(), out decimal net))
                 {
-                    MessageBox.Show("Invalid price/tax/total data detected in bill.");
+                    MessageBox.Show("Invalid amount data detected in bill.");
                     return false;
                 }
 
-                if (price < 0 || subtotal < 0 || gst < 0 || total < 0)
+                if (price < 0 || gross < 0 || taxable < 0 || gst < 0 || net < 0)
                 {
                     MessageBox.Show("Negative amount detected in bill.");
                     return false;
                 }
 
-                decimal expectedTotal = Round2(subtotal + gst);
-                if (Math.Abs(expectedTotal - total) > 0.01m)
+                decimal expectedNet = Round2(taxable + gst);
+
+                if (Math.Abs(expectedNet - net) > 0.01m)
                 {
-                    MessageBox.Show("Amount mismatch detected in one row. Please rescan or update quantity again.");
+                    MessageBox.Show(
+                        $"Amount mismatch.\n" +
+                        $"Taxable={taxable}\n" +
+                        $"GST={gst}\n" +
+                        $"Net={net}\n" +
+                        $"Expected={expectedNet}");
                     return false;
                 }
             }
@@ -2606,6 +3153,61 @@ LIMIT 1;", conn);
             }
 
             return true;
+        }
+
+        private void RecalculateRowAmounts()
+        {
+            foreach (DataGridViewRow row in dgvRight.Rows)
+            {
+                if (row.IsNewRow)
+                    continue;
+
+                decimal price =
+                    Convert.ToDecimal(row.Cells[3].Value);
+
+                int qty =
+                    Convert.ToInt32(row.Cells[4].Value);
+
+                if (IsManualDiscountRow(row))
+                {
+                    SetDiscountBreakdown(row, 0, GetCellDecimal(row, "Manual_Discount"), 0);
+                }
+                else
+                {
+                    SetDiscountBreakdown(
+                        row,
+                        GetCellDecimal(row, "Auto_Discount"),
+                        0,
+                        rewardApplied ? rewardDiscountPercent : GetCellDecimal(row, "Reward_Discount"));
+                }
+
+                decimal discount =
+                    GetCellDecimal(row, 1);
+
+                decimal gstPercent =
+                    Convert.ToDecimal(
+                        row.Cells["GSTPercent"].Value);
+
+                CalculateLineAmounts(
+                    price,
+                    gstPercent,
+                    discount,
+                    qty,
+                    out decimal taxable,
+                    out decimal gstAmount,
+                    out decimal net);
+
+                decimal gross =
+                    Round2(price * qty);
+
+                // NEW MAPPING
+                row.Cells[5].Value = gross;
+                row.Cells[6].Value = taxable;
+                row.Cells[7].Value = gstAmount;
+                row.Cells[8].Value = net;
+            }
+
+            RecalculateTotals();
         }
     }
 }
