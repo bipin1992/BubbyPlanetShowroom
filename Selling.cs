@@ -147,9 +147,15 @@ namespace BubbyPlanetShowroom
 
             dgvDetails.Columns.Add("Item", "Item");
             dgvDetails.Columns.Add("Size", "Size");
-            dgvDetails.Columns.Add("Qty", "Qty");
+            dgvDetails.Columns.Add("Qty", "Sold Qty");
+            dgvDetails.Columns.Add("ReturnedQty", "Returned");
+            dgvDetails.Columns.Add("NetQty", "Net Qty");
             dgvDetails.Columns.Add("Price", "Price");
+            dgvDetails.Columns.Add("Gross", "Gross");
             dgvDetails.Columns.Add("Discount", "Discount");
+            dgvDetails.Columns.Add("DiscountAmt", "Discount Amt");
+            dgvDetails.Columns.Add("Taxable", "Taxable");
+            dgvDetails.Columns.Add("GST", "GST");
             dgvDetails.Columns.Add("Total", "Total");
 
             main.Controls.Add(topPanel, 0, 0);
@@ -296,18 +302,28 @@ namespace BubbyPlanetShowroom
                     conn.Open();
 
                     string query = @"
-                    SELECT
-                        i.item_name,
-                        i.size,
-                        d.qty,
-                        d.price,
-                        IFNULL(d.discount_percent,0)
-                            discount_percent,
-                        d.total
-                    FROM inv_order_details d
-                    INNER JOIN inv_items_master i
-                        ON i.id=d.item_id
-                    WHERE d.order_id=@orderId";
+            SELECT
+                i.item_name,
+                i.size,
+                d.qty,
+                IFNULL(d.return_qty,0) return_qty,
+                (d.qty - IFNULL(d.return_qty,0)) net_qty,
+
+                d.selling_price,
+                d.gross_amount,
+
+                IFNULL(d.discount_percent,0)
+                    discount_percent,
+
+                d.discount_amount,
+                d.taxable_amount,
+                d.gst_amount,
+                d.net_amount
+
+            FROM inv_order_details d
+            INNER JOIN inv_items_master i
+                ON i.id = d.item_id
+            WHERE d.order_id = @orderId";
 
                     MySqlCommand cmd =
                         new MySqlCommand(query, conn);
@@ -322,12 +338,21 @@ namespace BubbyPlanetShowroom
                     while (reader.Read())
                     {
                         dgvDetails.Rows.Add(
-                            reader["item_name"],
-                            reader["size"],
-                            reader["qty"],
-                            reader["price"],
+                            reader["item_name"],          // Item
+                            reader["size"],               // Size
+                            reader["qty"],                // Qty
+                            reader["return_qty"],         // Returned
+                            reader["net_qty"],            // Net Qty
+
+                            reader["selling_price"],      // Price
+                            reader["gross_amount"],       // Gross
+
                             reader["discount_percent"] + "%",
-                            reader["total"]
+
+                            reader["discount_amount"],    // Discount Amt
+                            reader["taxable_amount"],     // Taxable
+                            reader["gst_amount"],         // GST
+                            reader["net_amount"]          // Net
                         );
                     }
                 }

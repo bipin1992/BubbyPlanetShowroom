@@ -237,15 +237,8 @@ namespace BubbyPlanetShowroom
                         if (btn.Text == "Receipt" || btn.Text == "Return")
                         {
                             btn.Visible = true;
-                            //btn.Enabled = false;
                         }
                     }
-
-                    //if (btn.Text == "Discount")
-                    //{
-                    //    btn.Visible = (role == "Master Admin");
-                    //}
-
                 }
             }
         }
