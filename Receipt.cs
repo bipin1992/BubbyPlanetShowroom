@@ -31,6 +31,7 @@ public class HoldBill
     public string FirstName { get; set; }
 
     public string Surname { get; set; }
+    public string MembershipName { get; set; }
 }
 
 public class HoldItem
@@ -105,6 +106,7 @@ namespace BubbyPlanetShowroom
         private decimal lastRewardCheckGrandTotal = -1;
 
         private bool isLoadingHoldBill = false;
+        private string currentMembership = "";
 
         private sealed class DraftScan
         {
@@ -268,6 +270,7 @@ namespace BubbyPlanetShowroom
 
             bill.RewardApplied = rewardApplied;
             bill.RewardDiscountPercent = rewardDiscountPercent;
+            bill.MembershipName = currentMembership;
 
             holdBills.Add(bill);
 
@@ -329,6 +332,7 @@ namespace BubbyPlanetShowroom
                 rewardDiscountPercent = bill.RewardDiscountPercent;
 
                 lastRewardMobile = bill.Mobile;
+                currentMembership = bill.MembershipName;
 
                 foreach (var item in bill.Items)
                 {
@@ -990,8 +994,8 @@ namespace BubbyPlanetShowroom
 
         private void CalculateRewardDiscount(MySqlConnection conn, int customerId, int rewardLastOrderId)
         {
-            if (customerId <= 0)
-                return;
+            //if (customerId <= 0)
+            //    return;
 
             MySqlCommand cmd =
                 new MySqlCommand(@"
@@ -1051,35 +1055,39 @@ namespace BubbyPlanetShowroom
             rewardPurchaseAmount = 0;
             lastRewardCheckMobile = "";
             lastRewardCheckGrandTotal = -1;
+            currentMembership = "";
 
             RecalculateRowAmounts();
         }
 
-        private decimal GetRewardDiscount(
-    MySqlConnection conn,
-    decimal amount)
+        private decimal GetRewardDiscount(MySqlConnection conn, decimal amount)
         {
             MySqlCommand cmd =
                 new MySqlCommand(@"
-        SELECT discount_percent
-        FROM inv_reward_discount_rules
-        WHERE min_purchase<=@amt
-        AND is_active=1
-        ORDER BY min_purchase DESC
-        LIMIT 1",
-                conn);
+                    SELECT membership_name,
+                           discount_percent
+                    FROM inv_reward_discount_rules
+                    WHERE min_purchase <= @amt
+                    AND is_active = 1
+                    ORDER BY min_purchase DESC
+                    LIMIT 1", conn);
 
-            cmd.Parameters.AddWithValue(
-                "@amt",
-                amount);
+            cmd.Parameters.AddWithValue("@amt", amount);
 
-            object result =
-                cmd.ExecuteScalar();
+            using (var reader = cmd.ExecuteReader())
+            {
+                if (reader.Read())
+                {
+                    currentMembership =
+                        reader["membership_name"]?.ToString() ?? "";
 
-            if (result == null)
-                return 0;
+                    return Convert.ToDecimal(
+                        reader["discount_percent"]);
+                }
+            }
 
-            return Convert.ToDecimal(result);
+            currentMembership = "";
+            return 0;
         }
 
         private void AskRewardRedemption(
@@ -1105,6 +1113,7 @@ namespace BubbyPlanetShowroom
             {
                 rewardApplied = false;
                 rewardDiscountPercent = 0;
+                currentMembership = "";
                 rewardPurchaseAmount = eligiblePurchase;
                 return;
             }
@@ -2135,6 +2144,12 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             g.DrawString($"Mobile: {customerMobile}", normalFont, Brushes.Black, 5, y);
             y += 15;
 
+            if (!string.IsNullOrWhiteSpace(currentMembership))
+            {
+                g.DrawString($"Membership: {currentMembership}",normalFont,Brushes.Black,5,y);
+                y += 15;
+            }
+
             g.DrawString(new string('-', 48), normalFont, Brushes.Black, 5, y);
             y += 15;
 
@@ -2274,14 +2289,36 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
 
             if (barcodeImage != null)
             {
+                //int barcodeWidth = 180;
+                //int barcodeHeight = 50;
+
+                //float barcodeX = (pageWidth - barcodeWidth) / 2;
+
+                //// 🔥 Barcode print
+                //g.DrawImage(barcodeImage, barcodeX, y, barcodeWidth, barcodeHeight);
+                //y += barcodeHeight + 5;
+
                 int barcodeWidth = 180;
                 int barcodeHeight = 50;
 
                 float barcodeX = (pageWidth - barcodeWidth) / 2;
 
-                // 🔥 Barcode print
+                // Barcode Print
                 g.DrawImage(barcodeImage, barcodeX, y, barcodeWidth, barcodeHeight);
                 y += barcodeHeight + 5;
+
+                // Invoice Number
+                string orderText = "" + lastOrderId;
+
+                Font textFont = new Font("Segoe UI", 9, FontStyle.Bold);
+
+                SizeF textSize = g.MeasureString(orderText, textFont);
+
+                float textX = (pageWidth - textSize.Width) / 2;
+
+                g.DrawString(orderText, textFont, Brushes.Black, textX, y);
+
+                y += textSize.Height + 5;
             }
 
             // ===== Thank You =====
@@ -2350,12 +2387,12 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
 
                     // Print first; commit only if print succeeds
 
-                    PrintPreviewDialog preview = new PrintPreviewDialog();
-                    preview.Document = printDocument;
-                    preview.Width = 1200;
-                    preview.Height = 800;
-                    preview.ShowDialog();
-                    //printDocument.Print();
+                    //PrintPreviewDialog preview = new PrintPreviewDialog();
+                    //preview.Document = printDocument;
+                    //preview.Width = 1200;
+                    //preview.Height = 800;
+                    //preview.ShowDialog();
+                    printDocument.Print();
 
                     transaction.Commit();
                     MessageBox.Show("Order Saved Successfully ✅\nOrder ID: " + orderId);
@@ -3015,6 +3052,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             lastRewardMobile = "";
             lastRewardCheckMobile = "";
             lastRewardCheckGrandTotal = -1;
+            currentMembership = "";
 
             txtBarcode.Focus();
         }

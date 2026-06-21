@@ -234,7 +234,7 @@ namespace BubbyPlanetShowroom
 
                     if (role == "Cashier")
                     {
-                        if (btn.Text == "Receipt" || btn.Text == "Return")
+                        if (btn.Text == "Receipt" || btn.Text == "Return" || (btn.Text == "IN") || (btn.Text == "Stock") || (btn.Text == "Label"))
                         {
                             btn.Visible = true;
                         }
