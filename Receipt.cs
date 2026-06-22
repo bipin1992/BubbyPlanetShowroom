@@ -107,7 +107,9 @@ namespace BubbyPlanetShowroom
 
         private bool isLoadingHoldBill = false;
         private string currentMembership = "";
-
+        private TextBox txtPaidAmount;
+        private TextBox txtBillAmount;
+        private Label lblReturnAmount;
         private sealed class DraftScan
         {
             public DateTime Time { get; set; }
@@ -443,14 +445,34 @@ namespace BubbyPlanetShowroom
 
             TableLayoutPanel barcodeActionPanel = new TableLayoutPanel();
             barcodeActionPanel.Dock = DockStyle.Top;
-            barcodeActionPanel.Height = 44;
+            barcodeActionPanel.Height = 75;
             barcodeActionPanel.Padding = new Padding(0, 0, 0, 6);
             barcodeActionPanel.BackColor = Color.Transparent;
-            barcodeActionPanel.ColumnCount = 3;
-            barcodeActionPanel.RowCount = 1;
-            barcodeActionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            barcodeActionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120F));
-            barcodeActionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130F));
+
+            barcodeActionPanel.ColumnCount = 7;
+
+            barcodeActionPanel.ColumnStyles.Clear();
+
+            barcodeActionPanel.ColumnStyles.Add(
+                new ColumnStyle(SizeType.Absolute, 280F));
+
+            barcodeActionPanel.ColumnStyles.Add(
+                new ColumnStyle(SizeType.Absolute, 120F));
+
+            barcodeActionPanel.ColumnStyles.Add(
+                new ColumnStyle(SizeType.Absolute, 130F));
+
+            barcodeActionPanel.ColumnStyles.Add(
+                new ColumnStyle(SizeType.Absolute, 20F));
+
+            barcodeActionPanel.ColumnStyles.Add(
+                new ColumnStyle(SizeType.Absolute, 160F));
+
+            barcodeActionPanel.ColumnStyles.Add(
+                new ColumnStyle(SizeType.Absolute, 160F));
+
+            barcodeActionPanel.ColumnStyles.Add(
+    new ColumnStyle(SizeType.Absolute, 180F));
 
             txtBarcode = new TextBox();
             txtBarcode.Font = new Font("Segoe UI", 12, FontStyle.Regular);
@@ -460,6 +482,10 @@ namespace BubbyPlanetShowroom
             txtBarcode.Dock = DockStyle.Fill;
             txtBarcode.Margin = new Padding(0, 0, 8, 0);
             txtBarcode.KeyDown += TxtBarcode_KeyDown;
+            txtBarcode.Dock = DockStyle.Fill;
+
+            txtBarcode.Margin =
+    new Padding(0, 8, 8, 8);
 
             dgvRight = new DataGridView();
             dgvRight.Dock = DockStyle.Fill;
@@ -547,15 +573,18 @@ namespace BubbyPlanetShowroom
 
             btnReset = new Button();
             btnReset.Text = "Reset Bill";
-            btnReset.Dock = DockStyle.Fill;
-            btnReset.Width = 120;
-            btnReset.Height = 34;
+            btnReset.Dock = DockStyle.None;
+            btnReset.Height = 35;
+            btnReset.Width = 100;
+            btnReset.Text = "Reset Bill";
             btnReset.FlatStyle = FlatStyle.Flat;
             btnReset.FlatAppearance.BorderSize = 0;
             btnReset.BackColor = ResetEnabledColor;
             btnReset.ForeColor = Color.White;
             btnReset.Enabled = false;
             btnReset.Click += BtnReset_Click;
+
+            btnReset.Margin = new Padding(0, 8, 8, 8);
 
             lblGrandTotal = new Label();
             lblGrandTotal.Font = new Font("Segoe UI", 12, FontStyle.Bold);
@@ -566,21 +595,117 @@ namespace BubbyPlanetShowroom
             lblGrandTotal.TextAlign = ContentAlignment.MiddleLeft;
 
             btnPrint = new Button();
-            btnPrint.Text = "Print Receipt";
-            btnPrint.Dock = DockStyle.Fill;
-            btnPrint.Width = 130;
-            btnPrint.Height = 34;
+            btnPrint.Text = "Print Bill";
+            btnPrint.Width = 100;
+            btnPrint.Height = 35;
             btnPrint.FlatStyle = FlatStyle.Flat;
             btnPrint.FlatAppearance.BorderSize = 0;
             btnPrint.BackColor = PrintEnabledColor;
             btnPrint.ForeColor = Color.White;
             btnPrint.Enabled = false;
 
-            btnReset.Margin = new Padding(0, 0, 8, 0);
-            btnPrint.Margin = new Padding(0);
+            btnPrint.Margin = new Padding(0, 8, 8, 8);
+
+
+            // ===== Paid Panel =====
+            TableLayoutPanel paidPanel = new TableLayoutPanel();
+            paidPanel.Dock = DockStyle.Fill;
+            paidPanel.RowCount = 2;
+            paidPanel.ColumnCount = 1;
+
+            paidPanel.RowStyles.Add(
+                new RowStyle(SizeType.Absolute, 20));
+
+            paidPanel.RowStyles.Add(
+                new RowStyle(SizeType.Absolute, 40));
+
+            Label lblPaid = new Label();
+            lblPaid.Text = "Paid Amount";
+            lblPaid.Dock = DockStyle.Fill;
+            lblPaid.Font = new Font("Segoe UI", 9, FontStyle.Bold);
+
+            txtPaidAmount = new TextBox();
+            txtPaidAmount.Dock = DockStyle.Fill;
+            txtPaidAmount.Font = new Font("Segoe UI", 11);
+            txtPaidAmount.TextAlign = HorizontalAlignment.Right;
+
+            paidPanel.Controls.Add(lblPaid, 0, 0);
+            paidPanel.Controls.Add(txtPaidAmount, 0, 1);
+
+
+            // ===== Bill Panel =====
+            TableLayoutPanel billPanel = new TableLayoutPanel();
+            billPanel.Dock = DockStyle.Fill;
+            billPanel.RowCount = 2;
+            billPanel.ColumnCount = 1;
+
+            billPanel.RowStyles.Add(
+                new RowStyle(SizeType.Absolute, 20));
+
+            billPanel.RowStyles.Add(
+                new RowStyle(SizeType.Absolute, 40));
+
+            Label lblBill = new Label();
+            lblBill.Text = "Bill Amount";
+            lblBill.Dock = DockStyle.Fill;
+            lblBill.Font = new Font("Segoe UI", 9, FontStyle.Bold);
+
+            txtBillAmount = new TextBox();
+            txtBillAmount.Dock = DockStyle.Fill;
+            txtBillAmount.Font = new Font("Segoe UI", 11);
+            txtBillAmount.ReadOnly = true;
+            txtBillAmount.BackColor = Color.WhiteSmoke;
+            txtBillAmount.TextAlign = HorizontalAlignment.Right;
+            txtBillAmount.ReadOnly = true;
+
+            billPanel.Controls.Add(lblBill, 0, 0);
+            billPanel.Controls.Add(txtBillAmount, 0, 1);
+
+
+            // ===== Return Panel =====
+            // ===== Return Panel =====
+            Panel pnlReturn = new Panel();
+            pnlReturn.Dock = DockStyle.Fill;
+            pnlReturn.BackColor = Color.White;
+            pnlReturn.BorderStyle = BorderStyle.FixedSingle;
+            pnlReturn.Padding = new Padding(3);
+
+            Label lblReturnTitle = new Label();
+            lblReturnTitle.Text = "Return";
+            lblReturnTitle.Dock = DockStyle.Top;
+            lblReturnTitle.Height = 16;
+            lblReturnTitle.TextAlign = ContentAlignment.MiddleLeft;
+            lblReturnTitle.Font = new Font("Segoe UI", 8, FontStyle.Bold);
+
+            lblReturnAmount = new Label();
+            lblReturnAmount.Text = "₹0.00";
+            lblReturnAmount.Dock = DockStyle.Fill;
+            lblReturnAmount.TextAlign = ContentAlignment.MiddleCenter;
+            lblReturnAmount.Font = new Font("Segoe UI", 11, FontStyle.Bold);
+            lblReturnAmount.ForeColor = Color.FromArgb(22, 163, 74);
+            lblReturnAmount.Height = 10;
+
+            pnlReturn.Controls.Add(lblReturnAmount);
+            pnlReturn.Controls.Add(lblReturnTitle);
+
+
+            // ===== Button Styling =====
+
+            btnReset.Font = new Font("Segoe UI", 10, FontStyle.Regular);
+            btnPrint.Font = new Font("Segoe UI", 10, FontStyle.Regular);
+
+
+            // ===== Add Controls =====
             barcodeActionPanel.Controls.Add(txtBarcode, 0, 0);
             barcodeActionPanel.Controls.Add(btnReset, 1, 0);
             barcodeActionPanel.Controls.Add(btnPrint, 2, 0);
+
+            barcodeActionPanel.Controls.Add(new Panel(), 3, 0);
+
+            barcodeActionPanel.Controls.Add(paidPanel, 4, 0);
+            barcodeActionPanel.Controls.Add(billPanel, 5, 0);
+            barcodeActionPanel.Controls.Add(pnlReturn, 6, 0);
+
 
             Panel draftPanel = new Panel();
             this.draftPanel = draftPanel;
@@ -856,6 +981,34 @@ namespace BubbyPlanetShowroom
             dgvRight.RowsAdded += (s, e) => UpdateActionButtonsState();
             dgvRight.RowsRemoved += (s, e) => UpdateActionButtonsState();
             UpdateActionButtonsState();
+            txtPaidAmount.TextChanged += (s, e) => CalculateReturnAmount();
+
+            txtBarcode.Margin = new Padding(0, 10, 8, 10);
+
+            btnReset.Margin = new Padding(0, 10, 8, 10);
+            btnPrint.Margin = new Padding(0, 10, 8, 10);
+        }
+
+        private void CalculateReturnAmount()
+        {
+            decimal paid = 0;
+
+            decimal.TryParse(txtPaidAmount.Text, out paid);
+
+            txtBillAmount.Text = grandTotal.ToString("0.00");
+
+            decimal balance = paid - grandTotal;
+
+            if (balance >= 0)
+            {
+                lblReturnAmount.ForeColor = Color.Green;
+                lblReturnAmount.Text = "₹" + balance.ToString("N2");
+            }
+            else
+            {
+                lblReturnAmount.ForeColor = Color.Red;
+                lblReturnAmount.Text = "-₹" + Math.Abs(balance).ToString("N2");
+            }
         }
 
         private void TxtMobile_KeyPress(object sender, KeyPressEventArgs e)
@@ -1749,6 +1902,8 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
 
             lblGrandTotal.Text =
                 "Grand Total: " + grandTotal.ToString("0.00");
+
+            CalculateReturnAmount();
 
             MaybeCheckRewardDiscount();
         }
