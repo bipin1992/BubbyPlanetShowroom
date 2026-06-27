@@ -97,7 +97,7 @@ namespace BubbyPlanetShowroom
                 ClearAfterSubCategory();
 
                 if (IsToys())
-                    LoadItemType();
+                    LoadActualItems();
                 else
                     LoadGenderOptions();
 
@@ -282,30 +282,24 @@ namespace BubbyPlanetShowroom
             if (IsToys())
             {
                 cmbSub.Enabled = true;
-                cmbItemType.Enabled = true;
                 cmbActual.Enabled = true;
-                cmbSize.Enabled = false;
+
                 cmbGender.Enabled = false;
-                //txtColor.Enabled = false;
+                cmbItemType.Enabled = false;
+                cmbSize.Enabled = false;
+
+                cmbGender.SelectedIndex = -1;
+                cmbItemType.SelectedIndex = -1;
+                cmbSize.SelectedIndex = -1;
             }
-            //else if (cmbMain.Text == "Footwears")
-            //{
-            //    cmbSub.Enabled = true;
-            //    cmbItemType.Enabled = false;
-            //    cmbSize.Enabled = true;
-            //}
-            else // Clothes and footwears
+            else
             {
                 cmbSub.Enabled = true;
                 cmbItemType.Enabled = true;
                 cmbActual.Enabled = true;
                 cmbSize.Enabled = true;
                 cmbGender.Enabled = true;
-                //txtColor.Enabled = true;
             }
-
-
-
         }
 
         Control CreateLeftUI()
@@ -654,7 +648,6 @@ namespace BubbyPlanetShowroom
             box.Padding = new Padding(10);
 
             TextBox txtSub = new TextBox();
-            TextBox txtType = new TextBox();
             TextBox txtActual = new TextBox();
 
             Button btnAdd = CreateManagerButton("Add Toy");
@@ -663,21 +656,18 @@ namespace BubbyPlanetShowroom
             {
                 bool saved = AddToyData(
                     txtSub.Text.Trim(),
-                    txtType.Text.Trim(),
                     txtActual.Text.Trim()
                 );
 
                 if (saved)
                 {
                     txtSub.Clear();
-                    txtType.Clear();
                     txtActual.Clear();
                 }
             };
 
             box.Controls.Add(CreateManagerContent(btnAdd,
                 ("Sub Category", txtSub),
-                ("Item Type", txtType),
                 ("Actual Item", txtActual)));
 
             return box;
@@ -726,8 +716,8 @@ namespace BubbyPlanetShowroom
 
             box.Controls.Add(CreateManagerContent(btnAdd,
                 ("Sub Category", txtSub),
-                ("Item Type", txtType),
                 ("Gender", cmbGenderRight),
+                ("Item Type", txtType),
                 ("Actual Item", txtActual)));
 
             return box;
@@ -901,9 +891,9 @@ namespace BubbyPlanetShowroom
             return true;
         }
 
-        bool AddToyData(string sub, string type, string actual)
+        bool AddToyData(string sub, string actual)
         {
-            if (sub == "" || type == "" || actual == "")
+            if (sub == "" || actual == "")
             {
                 MessageBox.Show("Fill all fields");
                 return false;
@@ -914,7 +904,6 @@ namespace BubbyPlanetShowroom
     FROM inv_item_category_master
     WHERE {CiEquals("main_category", "Toys")}
     AND {CiEquals("sub_category", sub)}
-    AND {CiEquals("item_type", type)}
     AND {CiEquals("actual_item", actual)}";
 
             var dt = DB.GetData(check);
@@ -928,10 +917,10 @@ namespace BubbyPlanetShowroom
             }
 
             string q = $@"
-    INSERT INTO inv_item_category_master
-    (main_category,sub_category,item_type,actual_item)
-    VALUES
-    ('Toys','{sub}','{type}','{actual}')";
+                INSERT INTO inv_item_category_master
+                (main_category,sub_category,item_type,actual_item)
+                VALUES
+                ('Toys','{sub}','NA','{actual}')";
 
             DB.Execute(q);
 
@@ -1177,7 +1166,7 @@ namespace BubbyPlanetShowroom
             // -------- TOYS --------
             else if (IsToys())
             {
-                if (cmbSub.Text == "" || cmbItemType.Text == "")
+                if (cmbSub.Text == "")
                     return;
 
                 q = $@"
@@ -1185,7 +1174,6 @@ namespace BubbyPlanetShowroom
                     FROM inv_item_category_master
                     WHERE {CiEquals("main_category", cmbMain.Text)}
                     AND {CiEquals("sub_category", cmbSub.Text)}
-                    AND {CiEquals("item_type", cmbItemType.Text)}
                     ORDER BY actual_item";
             }
 
@@ -1372,17 +1360,13 @@ namespace BubbyPlanetShowroom
 
         void GenerateToyCode()
         {
-            string toyPrefix = "T";
-            string pricePart = "";
-            if (decimal.TryParse(txtSell.Text, out decimal sellPrice) && sellPrice > 0)
-            {
-                int wholePrice = (int)Math.Round(sellPrice, MidpointRounding.AwayFromZero);
-                pricePart = wholePrice.ToString();
-            }
+            if (string.IsNullOrWhiteSpace(cmbSub.Text))
+                return;
 
-            string code = toyPrefix + pricePart;
+            string code = "T-" + cmbSub.Text.Trim();
 
-            string name = $"{cmbMain.Text} {cmbSub.Text} {cmbItemType.Text} {cmbActual.Text}";
+            string name =
+                $"{cmbMain.Text} {cmbSub.Text} {cmbActual.Text}";
 
             txtCode.Text = code;
             txtName.Text = name;
@@ -1981,6 +1965,12 @@ namespace BubbyPlanetShowroom
 
         void HandleDirectPriceMode()
         {
+            if (!chkDirectPriceCode.Checked)
+            {
+                HandleMainCategoryUI();
+                return;
+            }
+
             bool directMode = chkDirectPriceCode.Checked;
 
             cmbSub.Enabled = !directMode;
