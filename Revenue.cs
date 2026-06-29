@@ -1,329 +1,8 @@
-﻿//using System;
-//using System.Data;
-//using System.Drawing;
-//using System.Windows.Forms;
-//using MySql.Data.MySqlClient;
-
-//namespace BubbyPlanetShowroom
-//{
-//    public class Revenue : UserControl
-//    {
-//        string conn = "server=localhost;user=root;password=;database=showroom_db;";
-
-//        Panel topPanel = new Panel();
-//        FlowLayoutPanel summaryPanel = new FlowLayoutPanel();
-//        SplitContainer split = new SplitContainer();
-
-//        Panel graphPanel = new Panel();
-//        DataGridView grid = new DataGridView();
-
-//        ComboBox cmbType = new ComboBox();
-//        ComboBox cmbCustomer = new ComboBox();
-//        Button btnLoad = new Button();
-
-//        DataTable graphData = new DataTable();
-//        string currentLabelFormat = "dd";
-
-//        public Revenue()
-//        {
-//            InitUI();
-//            LoadCustomers();
-
-//            cmbType.SelectedItem = "Monthly";
-//            LoadData();
-//        }
-
-//        private void InitUI()
-//        {
-//            this.Dock = DockStyle.Fill;
-
-//            // 🔷 TOP PANEL
-//            topPanel.Dock = DockStyle.Top;
-//            topPanel.Height = 60;
-//            topPanel.BackColor = Color.FromArgb(30, 41, 59);
-
-//            cmbType.Items.AddRange(new string[] { "Daily", "Monthly", "Yearly", "Till Date" });
-//            cmbType.Location = new Point(20, 15);
-//            cmbType.Width = 120;
-
-//            cmbCustomer.Location = new Point(160, 15);
-//            cmbCustomer.Width = 150;
-
-//            btnLoad.Text = "Load";
-//            btnLoad.Location = new Point(330, 15);
-//            btnLoad.Click += (s, e) => LoadData();
-
-//            topPanel.Controls.Add(cmbType);
-//            topPanel.Controls.Add(cmbCustomer);
-//            topPanel.Controls.Add(btnLoad);
-
-//            // 🔷 SUMMARY
-//            summaryPanel.Dock = DockStyle.Top;
-//            summaryPanel.Height = 100;
-//            summaryPanel.Padding = new Padding(10);
-
-//            // 🔷 SPLIT CONTAINER
-//            split.Dock = DockStyle.Fill;
-//            split.Orientation = Orientation.Vertical;
-//            split.SplitterDistance = 400;
-
-//            // LEFT → GRID
-//            grid.Dock = DockStyle.Fill;
-//            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-//            grid.BorderStyle = BorderStyle.None;
-//            grid.BackgroundColor = Color.White;
-//            grid.RowHeadersVisible = false;
-//            grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(240, 240, 240);
-
-//            split.Panel1.Controls.Add(grid);
-
-//            // RIGHT → GRAPH
-//            graphPanel.Dock = DockStyle.Fill;
-//            graphPanel.BackColor = Color.White;
-//            graphPanel.Paint += GraphPanel_Paint;
-
-//            split.Panel2.Controls.Add(graphPanel);
-
-//            // ADD CONTROLS
-//            this.Controls.Add(split);
-//            this.Controls.Add(summaryPanel);
-//            this.Controls.Add(topPanel);
-
-//            // 🔥 FIX ORDER
-//            this.Controls.SetChildIndex(split, 0);
-//            this.Controls.SetChildIndex(summaryPanel, 1);
-//            this.Controls.SetChildIndex(topPanel, 2);
-//        }
-
-//        private void LoadCustomers()
-//        {
-//            using (MySqlConnection con = new MySqlConnection(conn))
-//            {
-//                con.Open();
-
-//                MySqlDataAdapter da = new MySqlDataAdapter(
-//                    "SELECT id, CONCAT(first_name,' ',sur_name) name FROM customers", con);
-
-//                DataTable dt = new DataTable();
-//                da.Fill(dt);
-
-//                DataRow r = dt.NewRow();
-//                r["id"] = 0;
-//                r["name"] = "All";
-//                dt.Rows.InsertAt(r, 0);
-
-//                cmbCustomer.DataSource = dt;
-//                cmbCustomer.DisplayMember = "name";
-//                cmbCustomer.ValueMember = "id";
-//            }
-//        }
-
-//        private void LoadData()
-//        {
-//            using (MySqlConnection con = new MySqlConnection(conn))
-//            {
-//                con.Open();
-
-//                string filter = "";
-//                string groupFormat = "";
-//                string labelFormat = "";
-
-//                if (cmbType.Text == "Daily")
-//                {
-//                    filter = "DATE(o.date_added)=CURDATE()";
-//                    groupFormat = "DATE(o.date_added)";
-//                    labelFormat = "dd";
-//                }
-//                else if (cmbType.Text == "Monthly")
-//                {
-//                    filter = "YEAR(o.date_added)=YEAR(CURDATE())";
-//                    groupFormat = "DATE(o.date_added)";
-//                    labelFormat = "dd";
-//                }
-//                else if (cmbType.Text == "Yearly")
-//                {
-//                    filter = "YEAR(o.date_added)=YEAR(CURDATE())";
-//                    groupFormat = "MONTH(o.date_added)";
-//                    labelFormat = "MM";
-//                }
-//                else
-//                {
-//                    filter = "1=1";
-//                    groupFormat = "DATE(o.date_added)";
-//                    labelFormat = "dd-MM";
-//                }
-
-//                if (Convert.ToInt32(cmbCustomer.SelectedValue) != 0)
-//                    filter += $" AND o.customer_id={cmbCustomer.SelectedValue}";
-
-//                decimal revenue = GetValue(con, filter);
-
-//                // 🔥 CARDS
-//                summaryPanel.Controls.Clear();
-
-//                summaryPanel.Controls.Add(CreateCard("Total", "₹ " + revenue.ToString("N0"), Color.Green));
-//                summaryPanel.Controls.Add(CreateCard("Today", "₹ " + GetValue(con, "DATE(o.date_added)=CURDATE()"), Color.Blue));
-//                summaryPanel.Controls.Add(CreateCard("This Month", "₹ " + GetValue(con, "MONTH(o.date_added)=MONTH(CURDATE()) AND YEAR(o.date_added)=YEAR(CURDATE())"), Color.Orange));
-//                summaryPanel.Controls.Add(CreateCard("This Year", "₹ " + GetValue(con, "YEAR(o.date_added)=YEAR(CURDATE())"), Color.Gray));
-
-//                // 📊 GRAPH DATA
-//                MySqlDataAdapter da = new MySqlDataAdapter($@"
-//                SELECT {groupFormat} AS grp, SUM(o.grand_total) total
-//                FROM orders o
-//                WHERE {filter}
-//                GROUP BY grp ORDER BY grp", con);
-
-//                graphData = new DataTable();
-//                da.Fill(graphData);
-
-//                currentLabelFormat = labelFormat;
-
-//                grid.DataSource = graphData;
-
-//                graphPanel.Invalidate();
-//            }
-//        }
-
-//        private decimal GetValue(MySqlConnection con, string condition)
-//        {
-//            object val = new MySqlCommand(
-//                $"SELECT SUM(o.grand_total) FROM orders o WHERE {condition}", con
-//            ).ExecuteScalar();
-
-//            return val == DBNull.Value ? 0 : Convert.ToDecimal(val);
-//        }
-
-//        private Panel CreateCard(string title, string value, Color color)
-//        {
-//            Panel p = new Panel();
-//            p.Width = 200;
-//            p.Height = 80;
-//            p.BackColor = color;
-//            p.Margin = new Padding(10);
-
-//            Label t = new Label();
-//            t.Text = title;
-//            t.ForeColor = Color.White;
-//            t.Location = new Point(10, 10);
-
-//            Label v = new Label();
-//            v.Text = value;
-//            v.ForeColor = Color.White;
-//            v.Font = new Font("Segoe UI", 14, FontStyle.Bold);
-//            v.Location = new Point(10, 35);
-
-//            p.Controls.Add(t);
-//            p.Controls.Add(v);
-
-//            return p;
-//        }
-
-//        private void GraphPanel_Paint(object sender, PaintEventArgs e)
-//        {
-//            Graphics g = e.Graphics;
-
-//            int width = graphPanel.Width;
-//            int height = graphPanel.Height;
-
-//            if (graphData == null || graphData.Rows.Count == 0)
-//            {
-//                g.DrawString("No Data", new Font("Segoe UI", 12), Brushes.Gray, 100, 100);
-//                return;
-//            }
-
-//            int margin = 60;
-//            int bottom = 50;
-
-//            int totalBars = graphData.Rows.Count;
-//            int barWidth = Math.Max(20, (width - margin) / (totalBars * 2));
-//            int gap = barWidth / 2;
-
-//            decimal max = 0;
-//            foreach (DataRow r in graphData.Rows)
-//                if (Convert.ToDecimal(r["total"]) > max)
-//                    max = Convert.ToDecimal(r["total"]);
-
-//            if (max == 0) return;
-
-//            int x = margin;
-
-//            foreach (DataRow r in graphData.Rows)
-//            {
-//                decimal val = Convert.ToDecimal(r["total"]);
-//                int h = (int)((val / max) * (height - 80));
-
-//                Rectangle rect = new Rectangle(x, height - h - bottom, barWidth, h);
-
-//                g.FillRectangle(Brushes.SteelBlue, rect);
-
-//                string label = "";
-//                try
-//                {
-//                    if (currentLabelFormat == "MM")
-//                        label = System.Globalization.CultureInfo.CurrentCulture
-//                            .DateTimeFormat.GetAbbreviatedMonthName(Convert.ToInt32(r["grp"]));
-//                    else
-//                        label = Convert.ToDateTime(r["grp"]).ToString(currentLabelFormat);
-//                }
-//                catch { }
-
-//                g.DrawString(label, new Font("Segoe UI", 8), Brushes.Black, x, height - 20);
-
-//                x += barWidth + gap;
-//            }
-//        }
-//    }
-//}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-using System;
+﻿using System;
 using System.Data;
 using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Globalization;
 using System.Windows.Forms;
 using MySql.Data.MySqlClient;
 
@@ -331,266 +10,798 @@ namespace BubbyPlanetShowroom
 {
     public class Revenue : UserControl
     {
-        Panel topPanel = new Panel();
-        FlowLayoutPanel summaryPanel = new FlowLayoutPanel();
-        Panel graphPanel = new Panel();
-        DataGridView grid = new DataGridView();
+        private readonly Panel topPanel = new Panel();
+        private readonly FlowLayoutPanel summaryPanel = new FlowLayoutPanel();
+        private readonly Panel chartPanel = new Panel();
+        private readonly DataGridView grid = new DataGridView();
+        private readonly ComboBox cmbType = new ComboBox();
+        private readonly DateTimePicker dtpDate = new DateTimePicker();
+        private readonly DateTimePicker dtpFrom = new DateTimePicker();
+        private readonly DateTimePicker dtpTo = new DateTimePicker();
+        private readonly Label statusLabel = new Label();
+        private readonly Label graphTitle = new Label();
+        private readonly Label tableTitle = new Label();
 
-        ComboBox cmbType = new ComboBox();
+        private DataTable graphData = new DataTable();
 
-        DataTable graphData = new DataTable();
+        private readonly Color pageBack = Color.FromArgb(245, 247, 251);
+        private readonly Color navy = Color.FromArgb(21, 32, 55);
+        private readonly Color textMain = Color.FromArgb(28, 37, 65);
+        private readonly Color textMuted = Color.FromArgb(104, 116, 140);
+        private readonly Color salesBlue = Color.FromArgb(37, 99, 235);
+        private readonly Color profitGreen = Color.FromArgb(16, 185, 129);
+        private readonly Color costAmber = Color.FromArgb(245, 158, 11);
 
         public Revenue()
         {
             InitUI();
-            cmbType.SelectedIndex = 0;
-            LoadData(true);
+            cmbType.SelectedIndex = 3;
+            LoadData();
         }
 
         private void InitUI()
         {
-            this.Dock = DockStyle.Fill;
+            Dock = DockStyle.Fill;
+            BackColor = pageBack;
+            Padding = new Padding(18);
 
             topPanel.Dock = DockStyle.Top;
-            topPanel.Height = 60;
-            topPanel.BackColor = Color.FromArgb(30, 41, 59);
+            topPanel.Height = 78;
+            topPanel.BackColor = pageBack;
+            topPanel.Padding = new Padding(0, 0, 0, 14);
 
-            cmbType.Items.AddRange(new string[] { "Daily", "Monthly", "Yearly", "Till Date" });
-            cmbType.Location = new Point(20, 15);
-            cmbType.Width = 120;
-            cmbType.SelectedIndexChanged += (s, e) => LoadData(false);
+            Label title = new Label
+            {
+                Text = "Revenue Dashboard",
+                AutoSize = true,
+                Font = new Font("Segoe UI Semibold", 20, FontStyle.Bold),
+                ForeColor = textMain,
+                Location = new Point(0, 4)
+            };
 
+            Label subtitle = new Label
+            {
+                Text = "Sales, cost price and profit view",
+                AutoSize = true,
+                Font = new Font("Segoe UI", 9),
+                ForeColor = textMuted,
+                Location = new Point(3, 44)
+            };
+
+            cmbType.Items.AddRange(new string[] { "Date Wise", "Date Range", "Today", "This Month", "This Year", "Till Date", "Category Wise" });
+            cmbType.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbType.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            cmbType.Location = new Point(Math.Max(0, Width - 190), 16);
+            cmbType.Width = 168;
+            cmbType.Font = new Font("Segoe UI", 10);
+            cmbType.SelectedIndexChanged += (s, e) =>
+            {
+                dtpDate.Visible = cmbType.Text == "Date Wise";
+                dtpFrom.Visible = cmbType.Text == "Date Range";
+                dtpTo.Visible = cmbType.Text == "Date Range";
+                PositionFilters();
+                LoadData();
+            };
+
+            dtpDate.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            dtpDate.Format = DateTimePickerFormat.Short;
+            dtpDate.Width = 126;
+            dtpDate.Font = new Font("Segoe UI", 10);
+            dtpDate.Visible = false;
+            dtpDate.ValueChanged += (s, e) =>
+            {
+                if (cmbType.Text == "Date Wise")
+                    LoadData();
+            };
+
+            dtpFrom.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            dtpFrom.Format = DateTimePickerFormat.Custom;
+            dtpFrom.CustomFormat = "'From' dd-MM-yy";
+            dtpFrom.Width = 128;
+            dtpFrom.Font = new Font("Segoe UI", 10);
+            dtpFrom.Value = DateTime.Today.AddDays(-7);
+            dtpFrom.Visible = false;
+            dtpFrom.ValueChanged += (s, e) =>
+            {
+                if (cmbType.Text == "Date Range")
+                    LoadData();
+            };
+
+            dtpTo.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            dtpTo.Format = DateTimePickerFormat.Custom;
+            dtpTo.CustomFormat = "'To' dd-MM-yy";
+            dtpTo.Width = 116;
+            dtpTo.Font = new Font("Segoe UI", 10);
+            dtpTo.Value = DateTime.Today;
+            dtpTo.Visible = false;
+            dtpTo.ValueChanged += (s, e) =>
+            {
+                if (cmbType.Text == "Date Range")
+                    LoadData();
+            };
+
+            topPanel.Resize += (s, e) =>
+            {
+                PositionFilters();
+            };
+
+            topPanel.Controls.Add(title);
+            topPanel.Controls.Add(subtitle);
+            topPanel.Controls.Add(dtpTo);
+            topPanel.Controls.Add(dtpFrom);
+            topPanel.Controls.Add(dtpDate);
             topPanel.Controls.Add(cmbType);
 
             summaryPanel.Dock = DockStyle.Top;
-            summaryPanel.Height = 100;
+            summaryPanel.Height = 168;
+            summaryPanel.BackColor = pageBack;
+            summaryPanel.WrapContents = false;
+            summaryPanel.AutoScroll = true;
+            summaryPanel.Padding = new Padding(0, 2, 0, 14);
 
-            Panel content = new Panel { Dock = DockStyle.Fill };
+            Panel content = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = pageBack
+            };
 
-            Panel left = new Panel { Width = 300, Dock = DockStyle.Left };
-            Panel right = new Panel { Dock = DockStyle.Fill };
-            Panel bottomGraph = new Panel { Height = 260, Dock = DockStyle.Bottom };
+            RoundedPanel tablePanel = new RoundedPanel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.White,
+                Radius = 8,
+                Padding = new Padding(16)
+            };
 
-            grid.Dock = DockStyle.Fill;
-            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            left.Controls.Add(grid);
+            RoundedPanel graphWrapper = new RoundedPanel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 285,
+                BackColor = Color.White,
+                Radius = 8,
+                Padding = new Padding(16),
+                Margin = new Padding(0, 0, 0, 14)
+            };
 
-            graphPanel.Dock = DockStyle.Fill;
-            graphPanel.Paint += GraphPanel_Paint;
-            bottomGraph.Controls.Add(graphPanel);
+            graphTitle.Text = "Sales vs Profit";
+            graphTitle.Dock = DockStyle.Top;
+            graphTitle.Height = 28;
+            graphTitle.Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold);
+            graphTitle.ForeColor = textMain;
 
-            right.Controls.Add(bottomGraph);
+            tableTitle.Text = "Period Breakdown";
+            tableTitle.Dock = DockStyle.Top;
+            tableTitle.Height = 32;
+            tableTitle.Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold);
+            tableTitle.ForeColor = textMain;
 
-            content.Controls.Add(right);
-            content.Controls.Add(left);
+            chartPanel.Dock = DockStyle.Fill;
+            chartPanel.BackColor = Color.White;
+            chartPanel.Paint += GraphPanel_Paint;
+            graphWrapper.Controls.Add(chartPanel);
+            graphWrapper.Controls.Add(graphTitle);
 
-            this.Controls.Add(content);
-            this.Controls.Add(summaryPanel);
-            this.Controls.Add(topPanel);
+            statusLabel.Dock = DockStyle.Bottom;
+            statusLabel.Height = 24;
+            statusLabel.ForeColor = textMuted;
+            statusLabel.Font = new Font("Segoe UI", 8.5f);
+            statusLabel.TextAlign = ContentAlignment.MiddleLeft;
+
+            ConfigureGrid();
+            tablePanel.Controls.Add(grid);
+            tablePanel.Controls.Add(statusLabel);
+            tablePanel.Controls.Add(tableTitle);
+
+            content.Controls.Add(tablePanel);
+            content.Controls.Add(graphWrapper);
+
+            Controls.Add(content);
+            Controls.Add(summaryPanel);
+            Controls.Add(topPanel);
         }
 
-        private void LoadData(bool loadSummary = false)
+        private void PositionFilters()
         {
-            using (MySqlConnection con = DB.GetConnection())
+            int right = topPanel.Width;
+            int y = 18;
+
+            if (dtpDate.Visible)
             {
-                con.Open();
+                dtpDate.Location = new Point(Math.Max(0, right - dtpDate.Width), y);
+                right = dtpDate.Left - 10;
+            }
 
-                if (loadSummary)
+            if (dtpTo.Visible)
+            {
+                dtpTo.Location = new Point(Math.Max(0, right - dtpTo.Width), y);
+                right = dtpTo.Left - 8;
+            }
+
+            if (dtpFrom.Visible)
+            {
+                dtpFrom.Location = new Point(Math.Max(0, right - dtpFrom.Width), y);
+                right = dtpFrom.Left - 10;
+            }
+
+            cmbType.Location = new Point(Math.Max(0, right - cmbType.Width), y);
+        }
+
+        private void ConfigureGrid()
+        {
+            grid.Dock = DockStyle.Fill;
+            grid.BorderStyle = BorderStyle.None;
+            grid.BackgroundColor = Color.White;
+            grid.RowHeadersVisible = false;
+            grid.AllowUserToAddRows = false;
+            grid.AllowUserToDeleteRows = false;
+            grid.ReadOnly = true;
+            grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            grid.MultiSelect = false;
+            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            grid.EnableHeadersVisualStyles = false;
+            grid.ColumnHeadersHeight = 38;
+            grid.RowTemplate.Height = 34;
+            grid.GridColor = Color.FromArgb(226, 232, 240);
+
+            grid.ColumnHeadersDefaultCellStyle.BackColor = navy;
+            grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
+            grid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI Semibold", 9, FontStyle.Bold);
+            grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleLeft;
+
+            grid.DefaultCellStyle.Font = new Font("Segoe UI", 9);
+            grid.DefaultCellStyle.ForeColor = textMain;
+            grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(219, 234, 254);
+            grid.DefaultCellStyle.SelectionForeColor = textMain;
+            grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 250, 252);
+        }
+
+        private void LoadData()
+        {
+            try
+            {
+                using (MySqlConnection con = DB.GetConnection())
+                {
+                    con.Open();
                     LoadSummary(con);
-
-                LoadGraphGrid(con);
+                    LoadGraphGrid(con);
+                }
+            }
+            catch (Exception ex)
+            {
+                summaryPanel.Controls.Clear();
+                graphData = new DataTable();
+                grid.DataSource = null;
+                statusLabel.Text = "Unable to load revenue data: " + ex.Message;
+                chartPanel.Invalidate();
             }
         }
 
-        // 🔥 CARDS (CORRECT)
         private void LoadSummary(MySqlConnection con)
         {
             summaryPanel.Controls.Clear();
 
-            // 🟢 TODAY
-            decimal today = GetValue(con,
-                "DATE(date_added) = CURDATE()");
-
-            // 🟠 WEEK (last 7 days)
-            decimal week = GetValue(con,
-                "DATE(date_added) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)");
-
-            // 🔵 MONTH
-            decimal month = GetValue(con,
-                "YEAR(date_added)=YEAR(CURDATE()) " +
-                "AND MONTH(date_added)=MONTH(CURDATE())");
-
-            // 🔷 YEAR
-            decimal year = GetValue(con,
-                "YEAR(date_added)=YEAR(CURDATE())");
-
-            // ⚫ TOTAL
-            decimal total = GetValue(con, "1=1");
-
-            summaryPanel.Controls.Add(CreateCard("Today", "₹ " + FormatAmount(today), Color.Green));
-            summaryPanel.Controls.Add(CreateCard("This Week", "₹ " + FormatAmount(week), Color.Blue));
-            summaryPanel.Controls.Add(CreateCard("This Month", "₹ " + FormatAmount(month), Color.Orange));
-            summaryPanel.Controls.Add(CreateCard("This Year", "₹ " + FormatAmount(year), Color.Purple));
-            summaryPanel.Controls.Add(CreateCard("Total", "₹ " + FormatAmount(total), Color.Gray));
+            AddSummaryCard("Today", GetMetrics(con, "DATE(o.date_added) = CURDATE()"), salesBlue);
+            AddSummaryCard("Last 7 Days", GetMetrics(con, "DATE(o.date_added) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)"), Color.FromArgb(99, 102, 241));
+            AddSummaryCard("This Month", GetMetrics(con, "YEAR(o.date_added)=YEAR(CURDATE()) AND MONTH(o.date_added)=MONTH(CURDATE())"), costAmber);
+            AddSummaryCard("This Year", GetMetrics(con, "YEAR(o.date_added)=YEAR(CURDATE())"), profitGreen);
+            AddSummaryCard("All Time", GetMetrics(con, "1=1"), Color.FromArgb(71, 85, 105));
         }
 
-        // 🔥 MAIN LOGIC
+        private void AddSummaryCard(string title, MetricSnapshot metric, Color accent)
+        {
+            summaryPanel.Controls.Add(CreateCard(title, metric, accent));
+        }
+
         private void LoadGraphGrid(MySqlConnection con)
         {
-            string query = "";
+            tableTitle.Text = cmbType.Text == "Category Wise" ? "Category Breakdown" : "Period Breakdown";
+            graphTitle.Text = cmbType.Text == "Category Wise" ? "Category Sales vs Profit" : "Sales vs Profit";
 
-            // 🟢 DAILY
-            if (cmbType.Text == "Daily")
+            string query = BuildPeriodQuery();
+            using (MySqlDataAdapter da = new MySqlDataAdapter(query, con))
             {
-                query = @"
-                SELECT DATE(date_added) grp, SUM(grand_total) total
-                FROM inv_orders
-                WHERE DATE(date_added) = CURDATE()
-                HAVING SUM(grand_total) > 0";
-
+                graphData = new DataTable();
+                da.Fill(graphData);
             }
-
-            // 🟠 MONTHLY (12 MONTHS)
-            else if (cmbType.Text == "Monthly")
-            {
-                query = @"
-                        SELECT 
-                            CASE m.month_num
-                                WHEN 1 THEN 'Jan'
-                                WHEN 2 THEN 'Feb'
-                                WHEN 3 THEN 'Mar'
-                                WHEN 4 THEN 'Apr'
-                                WHEN 5 THEN 'May'
-                                WHEN 6 THEN 'Jun'
-                                WHEN 7 THEN 'Jul'
-                                WHEN 8 THEN 'Aug'
-                                WHEN 9 THEN 'Sep'
-                                WHEN 10 THEN 'Oct'
-                                WHEN 11 THEN 'Nov'
-                                WHEN 12 THEN 'Dec'
-                            END AS grp,
-                            SUM(o.grand_total) AS total
-                        FROM 
-                        (
-                            SELECT 1 AS month_num UNION SELECT 2 UNION SELECT 3 UNION SELECT 4
-                            UNION SELECT 5 UNION SELECT 6 UNION SELECT 7 UNION SELECT 8
-                            UNION SELECT 9 UNION SELECT 10 UNION SELECT 11 UNION SELECT 12
-                        ) m
-                        LEFT JOIN inv_orders o 
-                            ON MONTH(o.date_added) = m.month_num 
-                            AND YEAR(o.date_added) = YEAR(CURDATE())
-                        GROUP BY m.month_num
-                        HAVING total > 0
-                        ORDER BY m.month_num DESC";
-            }
-
-            // 🔵 YEARLY
-            else if (cmbType.Text == "Yearly")
-            {
-                query = @"
-                        SELECT YEAR(date_added) grp, SUM(grand_total) total
-                        FROM inv_orders
-                        GROUP BY YEAR(date_added)
-                        HAVING total > 0
-                        ORDER BY grp DESC";
-            }
-
-            // ⚫ TILL DATE
-            else
-            {
-                query = @"
-                SELECT 'All' grp, SUM(grand_total) total
-                FROM inv_orders
-                HAVING total > 0";
-            }
-
-            MySqlDataAdapter da = new MySqlDataAdapter(query, con);
-            graphData = new DataTable();
-            da.Fill(graphData);
 
             grid.DataSource = graphData;
+            FormatGridColumns();
 
-            graphPanel.Refresh();
+            decimal sales = SumColumn("Sales");
+            decimal cost = SumColumn("Cost");
+            decimal profit = SumColumn("Profit");
+            decimal profitPercent = sales == 0 ? 0 : (profit / sales) * 100m;
+
+            statusLabel.Text = $"Selected view: {GetSelectedViewText()}   |   Sales: Rs. {sales:N2}   Cost: Rs. {cost:N2}   Profit: Rs. {profit:N2}   Profit %: {profitPercent:N1}%";
+            chartPanel.Refresh();
         }
 
-        private decimal GetValue(MySqlConnection con, string condition)
+        private string BuildPeriodQuery()
         {
-            object val = new MySqlCommand(
-                $"SELECT IFNULL(SUM(grand_total),0) FROM inv_orders WHERE {condition}", con
-            ).ExecuteScalar();
+            string periodSql;
+            string sortSql;
+            string condition;
+            string groupSql;
+            string orderSql;
 
-            return Convert.ToDecimal(val);
+            if (cmbType.Text == "Category Wise")
+            {
+                periodSql = "IFNULL(NULLIF(TRIM(i.main_category), ''), 'Other')";
+                sortSql = "IFNULL(NULLIF(TRIM(i.main_category), ''), 'Other')";
+                condition = "1=1";
+                groupSql = "IFNULL(NULLIF(TRIM(i.main_category), ''), 'Other')";
+                orderSql = "Profit DESC";
+            }
+            else if (cmbType.Text == "Date Wise")
+            {
+                string selectedDate = dtpDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                periodSql = "DATE_FORMAT(o.date_added, '%h %p')";
+                sortSql = "HOUR(o.date_added)";
+                condition = $"DATE(o.date_added) = '{selectedDate}'";
+                groupSql = "HOUR(o.date_added), DATE_FORMAT(o.date_added, '%h %p')";
+                orderSql = "sort_key ASC";
+            }
+            else if (cmbType.Text == "Date Range")
+            {
+                DateTime from = dtpFrom.Value.Date;
+                DateTime to = dtpTo.Value.Date;
+                if (from > to)
+                {
+                    DateTime temp = from;
+                    from = to;
+                    to = temp;
+                }
+
+                string fromSql = from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                string toSql = to.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+                periodSql = "DATE_FORMAT(o.date_added, '%d %b')";
+                sortSql = "DATE(o.date_added)";
+                condition = $"DATE(o.date_added) BETWEEN '{fromSql}' AND '{toSql}'";
+                groupSql = "DATE(o.date_added), DATE_FORMAT(o.date_added, '%d %b')";
+                orderSql = "sort_key ASC";
+            }
+            else if (cmbType.Text == "Today")
+            {
+                periodSql = "DATE_FORMAT(o.date_added, '%h %p')";
+                sortSql = "HOUR(o.date_added)";
+                condition = "DATE(o.date_added) = CURDATE()";
+                groupSql = "HOUR(o.date_added), DATE_FORMAT(o.date_added, '%h %p')";
+                orderSql = "sort_key ASC";
+            }
+            else if (cmbType.Text == "This Year")
+            {
+                periodSql = "DATE_FORMAT(o.date_added, '%b %Y')";
+                sortSql = "DATE_FORMAT(o.date_added, '%Y-%m')";
+                condition = "YEAR(o.date_added)=YEAR(CURDATE())";
+                groupSql = "DATE_FORMAT(o.date_added, '%Y-%m'), DATE_FORMAT(o.date_added, '%b %Y')";
+                orderSql = "sort_key ASC";
+            }
+            else if (cmbType.Text == "Till Date")
+            {
+                periodSql = "DATE_FORMAT(o.date_added, '%b %Y')";
+                sortSql = "DATE_FORMAT(o.date_added, '%Y-%m')";
+                condition = "1=1";
+                groupSql = "DATE_FORMAT(o.date_added, '%Y-%m'), DATE_FORMAT(o.date_added, '%b %Y')";
+                orderSql = "sort_key DESC";
+            }
+            else
+            {
+                periodSql = "DATE_FORMAT(o.date_added, '%d %b')";
+                sortSql = "DATE(o.date_added)";
+                condition = "YEAR(o.date_added)=YEAR(CURDATE()) AND MONTH(o.date_added)=MONTH(CURDATE())";
+                groupSql = "DATE(o.date_added), DATE_FORMAT(o.date_added, '%d %b')";
+                orderSql = "sort_key DESC";
+            }
+
+            return $@"
+SELECT
+    {periodSql} AS Period,
+    COUNT(DISTINCT o.id) AS Orders,
+    SUM(GREATEST(IFNULL(d.qty,0) - IFNULL(d.return_qty,0), 0)) AS Qty,
+    ROUND(IFNULL(SUM(IFNULL(d.net_amount,0)),0), 2) AS Sales,
+    ROUND(IFNULL(SUM(IFNULL(i.cost_price,0) * GREATEST(IFNULL(d.qty,0) - IFNULL(d.return_qty,0), 0)),0), 2) AS Cost,
+    ROUND(
+        IFNULL(SUM(IFNULL(d.net_amount,0)),0) -
+        IFNULL(SUM(IFNULL(i.cost_price,0) * GREATEST(IFNULL(d.qty,0) - IFNULL(d.return_qty,0), 0)),0),
+        2
+    ) AS Profit,
+    ROUND(
+        CASE
+            WHEN IFNULL(SUM(IFNULL(d.net_amount,0)),0) = 0 THEN 0
+            ELSE (
+                (
+                    IFNULL(SUM(IFNULL(d.net_amount,0)),0) -
+                    IFNULL(SUM(IFNULL(i.cost_price,0) * GREATEST(IFNULL(d.qty,0) - IFNULL(d.return_qty,0), 0)),0)
+                ) / IFNULL(SUM(IFNULL(d.net_amount,0)),0)
+            ) * 100
+        END,
+        2
+    ) AS ProfitPercent,
+    {sortSql} AS sort_key
+FROM inv_orders o
+INNER JOIN inv_order_details d ON d.order_id = o.id
+LEFT JOIN inv_items_master i ON i.id = d.item_id
+WHERE {condition}
+GROUP BY {groupSql}
+HAVING Sales > 0 OR Cost > 0
+ORDER BY {orderSql};";
+        }
+
+        private MetricSnapshot GetMetrics(MySqlConnection con, string condition)
+        {
+            string query = $@"
+SELECT
+    IFNULL(SUM(IFNULL(d.net_amount,0)),0) AS Sales,
+    IFNULL(SUM(IFNULL(i.cost_price,0) * GREATEST(IFNULL(d.qty,0) - IFNULL(d.return_qty,0), 0)),0) AS Cost,
+    COUNT(DISTINCT o.id) AS Orders,
+    IFNULL(SUM(GREATEST(IFNULL(d.qty,0) - IFNULL(d.return_qty,0), 0)),0) AS Qty
+FROM inv_orders o
+INNER JOIN inv_order_details d ON d.order_id = o.id
+LEFT JOIN inv_items_master i ON i.id = d.item_id
+WHERE {condition};";
+
+            using (MySqlCommand cmd = new MySqlCommand(query, con))
+            using (MySqlDataReader reader = cmd.ExecuteReader())
+            {
+                if (!reader.Read())
+                    return new MetricSnapshot();
+
+                decimal sales = Convert.ToDecimal(reader["Sales"]);
+                decimal cost = Convert.ToDecimal(reader["Cost"]);
+
+                return new MetricSnapshot
+                {
+                    Sales = sales,
+                    Cost = cost,
+                    Profit = sales - cost,
+                    Orders = Convert.ToInt32(reader["Orders"]),
+                    Qty = Convert.ToInt32(reader["Qty"])
+                };
+            }
+        }
+
+        private decimal SumColumn(string columnName)
+        {
+            if (graphData == null || !graphData.Columns.Contains(columnName))
+                return 0;
+
+            decimal total = 0;
+            foreach (DataRow row in graphData.Rows)
+            {
+                if (row[columnName] != DBNull.Value)
+                    total += Convert.ToDecimal(row[columnName]);
+            }
+
+            return total;
+        }
+
+        private void FormatGridColumns()
+        {
+            if (grid.Columns.Count == 0)
+                return;
+
+            if (grid.Columns.Contains("sort_key"))
+                grid.Columns["sort_key"].Visible = false;
+
+            SetHeader("Period", cmbType.Text == "Category Wise" ? "Category" : "Period");
+            SetHeader("Orders", "Bills");
+            SetHeader("Qty", "Qty Sold");
+            SetMoneyColumn("Sales", "Sell Amount");
+            SetMoneyColumn("Cost", "Cost Amount");
+            SetMoneyColumn("Profit", "Profit");
+
+            if (grid.Columns.Contains("ProfitPercent"))
+            {
+                grid.Columns["ProfitPercent"].HeaderText = "Profit %";
+                grid.Columns["ProfitPercent"].DefaultCellStyle.Format = "N2";
+                grid.Columns["ProfitPercent"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+            }
+
+            foreach (DataGridViewColumn col in grid.Columns)
+            {
+                if (col.Name != "Period")
+                    col.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+            }
+        }
+
+        private void SetHeader(string columnName, string headerText)
+        {
+            if (grid.Columns.Contains(columnName))
+                grid.Columns[columnName].HeaderText = headerText;
+        }
+
+        private void SetMoneyColumn(string columnName, string headerText)
+        {
+            if (!grid.Columns.Contains(columnName))
+                return;
+
+            grid.Columns[columnName].HeaderText = headerText;
+            grid.Columns[columnName].DefaultCellStyle.Format = "N2";
+            grid.Columns[columnName].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+
+            if (columnName == "Profit")
+                grid.Columns[columnName].DefaultCellStyle.ForeColor = profitGreen;
+        }
+
+        private Panel CreateCard(string title, MetricSnapshot metric, Color accent)
+        {
+            RoundedPanel p = new RoundedPanel
+            {
+                Width = 224,
+                Height = 138,
+                BackColor = Color.White,
+                Radius = 8,
+                Margin = new Padding(0, 0, 14, 0),
+                Padding = new Padding(14)
+            };
+
+            Panel accentLine = new Panel
+            {
+                BackColor = accent,
+                Dock = DockStyle.Left,
+                Width = 4
+            };
+
+            Label titleLabel = new Label
+            {
+                Text = title,
+                AutoSize = false,
+                Width = 180,
+                Height = 22,
+                Location = new Point(18, 12),
+                Font = new Font("Segoe UI Semibold", 9, FontStyle.Bold),
+                ForeColor = textMuted
+            };
+
+            Label salesLabel = new Label
+            {
+                Text = "Rs. " + FormatAmount(metric.Sales),
+                AutoSize = false,
+                Width = 188,
+                Height = 34,
+                Location = new Point(18, 34),
+                Font = new Font("Segoe UI Semibold", 18, FontStyle.Bold),
+                ForeColor = textMain
+            };
+
+            Label costLabel = new Label
+            {
+                Text = "Cost: Rs. " + FormatAmount(metric.Cost),
+                AutoSize = false,
+                Width = 188,
+                Height = 18,
+                Location = new Point(18, 72),
+                Font = new Font("Segoe UI", 8.2f),
+                ForeColor = textMuted
+            };
+
+            Label profitLabel = new Label
+            {
+                Text = "Profit: Rs. " + FormatAmount(metric.Profit),
+                AutoSize = false,
+                Width = 188,
+                Height = 18,
+                Location = new Point(18, 92),
+                Font = new Font("Segoe UI Semibold", 8.6f, FontStyle.Bold),
+                ForeColor = metric.Profit >= 0 ? profitGreen : Color.FromArgb(220, 38, 38)
+            };
+
+            Label qtyLabel = new Label
+            {
+                Text = $"{metric.Orders} bills  |  {metric.Qty} pcs",
+                AutoSize = false,
+                Width = 188,
+                Height = 18,
+                Location = new Point(18, 114),
+                Font = new Font("Segoe UI", 8),
+                ForeColor = textMuted
+            };
+
+            p.Controls.Add(qtyLabel);
+            p.Controls.Add(profitLabel);
+            p.Controls.Add(costLabel);
+            p.Controls.Add(salesLabel);
+            p.Controls.Add(titleLabel);
+            p.Controls.Add(accentLine);
+            return p;
         }
 
         private string FormatAmount(decimal amount)
         {
-            if (amount >= 10000000) // 1 Cr
-                return (amount / 10000000).ToString("0.#") + "Cr";
+            decimal abs = Math.Abs(amount);
+            string sign = amount < 0 ? "-" : "";
 
-            if (amount >= 100000) // 1 Lakh
-                return (amount / 100000).ToString("0.#") + "L";
+            if (abs >= 10000000)
+                return sign + (abs / 10000000).ToString("0.##") + "Cr";
 
-            if (amount >= 1000) // 1 Thousand
-                return (amount / 1000).ToString("0.#") + "K";
+            if (abs >= 100000)
+                return sign + (abs / 100000).ToString("0.##") + "L";
 
-            return amount.ToString("0");
+            if (abs >= 1000)
+                return sign + (abs / 1000).ToString("0.#") + "K";
+
+            return sign + abs.ToString("0");
         }
 
-        private Panel CreateCard(string t, string v, Color c)
+        private string GetSelectedViewText()
         {
-            Panel p = new Panel { Width = 180, Height = 80, BackColor = c };
+            if (cmbType.Text == "Date Wise")
+                return "Date Wise - " + dtpDate.Value.ToString("dd-MMM-yyyy", CultureInfo.InvariantCulture);
 
-            Label l1 = new Label { Text = t, ForeColor = Color.White, Location = new Point(10, 10) };
-            Label l2 = new Label
+            if (cmbType.Text == "Date Range")
             {
-                Text = v,
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 12, FontStyle.Bold),
-                Location = new Point(10, 35)
-            };
+                DateTime from = dtpFrom.Value.Date;
+                DateTime to = dtpTo.Value.Date;
+                if (from > to)
+                {
+                    DateTime temp = from;
+                    from = to;
+                    to = temp;
+                }
 
-            p.Controls.Add(l1);
-            p.Controls.Add(l2);
+                return "Date Range - " +
+                    from.ToString("dd-MMM-yyyy", CultureInfo.InvariantCulture) +
+                    " to " +
+                    to.ToString("dd-MMM-yyyy", CultureInfo.InvariantCulture);
+            }
 
-            return p;
+            return cmbType.Text;
         }
 
         private void GraphPanel_Paint(object sender, PaintEventArgs e)
         {
             Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.Clear(Color.White);
 
-            if (graphData == null || graphData.Rows.Count == 0) return;
+            Rectangle area = chartPanel.ClientRectangle;
+            if (area.Width < 120 || area.Height < 120)
+                return;
 
-            int height = graphPanel.Height;
+            if (graphData == null || graphData.Rows.Count == 0)
+            {
+                DrawCenteredText(g, "No revenue data for this view", area, textMuted);
+                return;
+            }
+
+            int left = 58;
+            int right = 24;
+            int top = 28;
+            int bottom = 54;
+            Rectangle plot = new Rectangle(left, top, area.Width - left - right, area.Height - top - bottom);
 
             decimal max = 0;
             foreach (DataRow r in graphData.Rows)
             {
-                decimal v = Convert.ToDecimal(r["total"]);
-                if (v > max) max = v;
+                max = Math.Max(max, Math.Abs(ReadDecimal(r, "Sales")));
+                max = Math.Max(max, Math.Abs(ReadDecimal(r, "Profit")));
             }
 
-            int x = 50;
-
-            foreach (DataRow r in graphData.Rows)
+            if (max <= 0)
             {
-                decimal val = Convert.ToDecimal(r["total"]);
-                int h = (int)((val / max) * (height - 100));
-                if (h < 5) h = 5;
+                DrawCenteredText(g, "No positive sales to chart", area, textMuted);
+                return;
+            }
 
-                g.FillRectangle(Brushes.SteelBlue, x, height - h - 40, 30, h);
+            using (Pen gridPen = new Pen(Color.FromArgb(226, 232, 240)))
+            using (Pen axisPen = new Pen(Color.FromArgb(148, 163, 184)))
+            using (Brush labelBrush = new SolidBrush(textMuted))
+            using (Font small = new Font("Segoe UI", 8))
+            using (Brush salesBrush = new SolidBrush(salesBlue))
+            using (Brush profitBrush = new SolidBrush(profitGreen))
+            using (Brush lossBrush = new SolidBrush(Color.FromArgb(220, 38, 38)))
+            {
+                for (int i = 0; i <= 4; i++)
+                {
+                    int y = plot.Bottom - (plot.Height * i / 4);
+                    g.DrawLine(gridPen, plot.Left, y, plot.Right, y);
+                    decimal tick = max * i / 4;
+                    g.DrawString(FormatAmount(tick), small, labelBrush, 4, y - 8);
+                }
 
-                g.DrawString(val.ToString("N0"),
-                    new Font("Segoe UI", 8),
-                    Brushes.Black,
-                    x, height - h - 55);
+                g.DrawLine(axisPen, plot.Left, plot.Bottom, plot.Right, plot.Bottom);
 
-                g.DrawString(r["grp"].ToString(),
-                    new Font("Segoe UI", 7),
-                    Brushes.Black,
-                    x, height - 20);
+                int count = graphData.Rows.Count;
+                int slot = Math.Max(44, plot.Width / Math.Max(count, 1));
+                int barWidth = Math.Min(24, Math.Max(8, slot / 5));
+                int x = plot.Left + Math.Max(4, (slot - (barWidth * 2 + 5)) / 2);
 
-                x += 45;
+                foreach (DataRow r in graphData.Rows)
+                {
+                    decimal sales = ReadDecimal(r, "Sales");
+                    decimal profit = ReadDecimal(r, "Profit");
+                    int salesHeight = (int)(plot.Height * (double)(sales / max));
+                    int profitHeight = (int)(plot.Height * (double)(Math.Abs(profit) / max));
+
+                    Rectangle salesRect = new Rectangle(x, plot.Bottom - Math.Max(2, salesHeight), barWidth, Math.Max(2, salesHeight));
+                    Rectangle profitRect = new Rectangle(x + barWidth + 5, plot.Bottom - Math.Max(2, profitHeight), barWidth, Math.Max(2, profitHeight));
+
+                    g.FillRectangle(salesBrush, salesRect);
+                    g.FillRectangle(profit >= 0 ? profitBrush : lossBrush, profitRect);
+
+                    string label = r["Period"].ToString() ?? "";
+                    if (label.Length > 8)
+                        label = label.Substring(0, 8);
+
+                    g.DrawString(label, small, labelBrush, x - 4, plot.Bottom + 10);
+                    x += slot;
+                }
+
+                DrawLegend(g, area.Right - 190, 4, salesBrush, "Sell", small);
+                DrawLegend(g, area.Right - 105, 4, profitBrush, "Profit", small);
+            }
+        }
+
+        private decimal ReadDecimal(DataRow row, string column)
+        {
+            if (!graphData.Columns.Contains(column) || row[column] == DBNull.Value)
+                return 0;
+
+            return Convert.ToDecimal(row[column]);
+        }
+
+        private void DrawLegend(Graphics g, int x, int y, Brush brush, string label, Font font)
+        {
+            g.FillRectangle(brush, x, y + 4, 12, 8);
+            using (Brush labelBrush = new SolidBrush(textMuted))
+            {
+                g.DrawString(label, font, labelBrush, x + 18, y);
+            }
+        }
+
+        private void DrawCenteredText(Graphics g, string text, Rectangle area, Color color)
+        {
+            using (Brush brush = new SolidBrush(color))
+            using (Font font = new Font("Segoe UI", 10))
+            using (StringFormat format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+            {
+                g.DrawString(text, font, brush, area, format);
+            }
+        }
+
+        private class MetricSnapshot
+        {
+            public decimal Sales { get; set; }
+            public decimal Cost { get; set; }
+            public decimal Profit { get; set; }
+            public int Orders { get; set; }
+            public int Qty { get; set; }
+        }
+
+        private class RoundedPanel : Panel
+        {
+            public int Radius { get; set; } = 8;
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                base.OnPaint(e);
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+                using (GraphicsPath path = CreatePath(ClientRectangle, Radius))
+                using (Pen pen = new Pen(Color.FromArgb(226, 232, 240)))
+                {
+                    Region = new Region(path);
+                    Rectangle borderRect = ClientRectangle;
+                    borderRect.Width -= 1;
+                    borderRect.Height -= 1;
+                    using (GraphicsPath borderPath = CreatePath(borderRect, Radius))
+                    {
+                        e.Graphics.DrawPath(pen, borderPath);
+                    }
+                }
+            }
+
+            private static GraphicsPath CreatePath(Rectangle rect, int radius)
+            {
+                int diameter = Math.Max(1, radius * 2);
+                GraphicsPath path = new GraphicsPath();
+                path.AddArc(rect.Left, rect.Top, diameter, diameter, 180, 90);
+                path.AddArc(rect.Right - diameter, rect.Top, diameter, diameter, 270, 90);
+                path.AddArc(rect.Right - diameter, rect.Bottom - diameter, diameter, diameter, 0, 90);
+                path.AddArc(rect.Left, rect.Bottom - diameter, diameter, diameter, 90, 90);
+                path.CloseFigure();
+                return path;
             }
         }
     }
