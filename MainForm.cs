@@ -124,6 +124,7 @@ namespace BubbyPlanetShowroom
             AddMenuButton("Revenue");
             AddMenuButton("Discount");
             AddMenuButton("Selling");
+            AddMenuButton("Closing Balance");
         }
 
         private void AddMenuButton(string text)
@@ -162,6 +163,7 @@ namespace BubbyPlanetShowroom
                     "Revenue" => new Revenue(), // ✅ NEW
                     "Discount" => new DiscountManager(CurrentRole),
                     "Selling" => new Selling(),
+                    "Closing Balance" => new ClosingBalance(),
                     _ => null
                 };
 
@@ -226,7 +228,7 @@ namespace BubbyPlanetShowroom
 
                     if (role == "Admin")
                     {
-                        if ((btn.Text == "Add Item") || (btn.Text == "Master") || (btn.Text == "IN") || (btn.Text == "Stock") || (btn.Text == "Label") || (btn.Text == "Receipt") || (btn.Text == "Return"))
+                        if ((btn.Text == "Add Item") || (btn.Text == "Master") || (btn.Text == "IN") || (btn.Text == "Stock") || (btn.Text == "Label") || (btn.Text == "Receipt") || (btn.Text == "Return") || (btn.Text == "Closing Balance"))
                         {
                             btn.Visible = true;
                         }
@@ -234,7 +236,7 @@ namespace BubbyPlanetShowroom
 
                     if (role == "Cashier")
                     {
-                        if (btn.Text == "Receipt" || btn.Text == "Return" || (btn.Text == "IN") || (btn.Text == "Stock") || (btn.Text == "Label"))
+                        if (btn.Text == "Receipt" || btn.Text == "Return" || (btn.Text == "IN") || (btn.Text == "Stock") || (btn.Text == "Label") || (btn.Text == "Closing Balance"))
                         {
                             btn.Visible = true;
                         }
