@@ -2725,12 +2725,12 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
 
                     // Print first; commit only if print succeeds
 
-                    PrintPreviewDialog preview = new PrintPreviewDialog();
-                    preview.Document = printDocument;
-                    preview.Width = 1200;
-                    preview.Height = 800;
-                    preview.ShowDialog();
-                    //printDocument.Print();
+                    //PrintPreviewDialog preview = new PrintPreviewDialog();
+                    //preview.Document = printDocument;
+                    //preview.Width = 1200;
+                    //preview.Height = 800;
+                    //preview.ShowDialog();
+                    printDocument.Print();
 
                     transaction.Commit();
                     MessageBox.Show("Order Saved Successfully ✅\nOrder ID: " + orderId);
