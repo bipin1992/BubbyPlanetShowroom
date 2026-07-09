@@ -1082,102 +1082,286 @@ namespace BubbyPlanetShowroom
 
             if (lastRewardCheckMobile == mobile &&
                 lastRewardCheckGrandTotal == grandTotal)
-            {
                 return;
-            }
 
-            lastRewardCheckMobile = mobile;
-            lastRewardCheckGrandTotal = grandTotal;
-            CheckRewardDiscount();
+            if (CheckRewardDiscount())
+            {
+                lastRewardCheckMobile = mobile;
+                lastRewardCheckGrandTotal = grandTotal;
+            }
         }
 
-        private void CheckRewardDiscount()
+        private bool TryGetRewardCustomerInfo(
+            MySqlConnection conn,
+            string mobile,
+            out int customerId,
+            out int rewardLastOrderId)
         {
-            try
-            {
-                string mobile = txtMobile.Text.Trim();
+            customerId = 0;
+            rewardLastOrderId = 0;
 
-                using (MySqlConnection conn = DB.GetConnection())
-                {
-                    conn.Open();
-
-                    int customerId = 0;
-                    int rewardLastOrderId = 0;
-
-                    using (MySqlCommand customerCmd =
-                        new MySqlCommand(@"
+            using (MySqlCommand customerCmd =
+                new MySqlCommand(@"
                 SELECT
                     id,
                     IFNULL(reward_last_order_id,0) AS reward_last_order_id
                 FROM inv_customers
                 WHERE phone=@phone
                 LIMIT 1",
-                        conn))
+                conn))
+            {
+                customerCmd.Parameters.AddWithValue("@phone", mobile);
+
+                using (MySqlDataReader reader = customerCmd.ExecuteReader())
+                {
+                    if (!reader.Read())
+                        return false;
+
+                    customerId = Convert.ToInt32(reader["id"]);
+                    rewardLastOrderId =
+                        Convert.ToInt32(reader["reward_last_order_id"]);
+                    return true;
+                }
+            }
+        }
+
+        private decimal GetPreviousRewardPurchase(
+            MySqlConnection conn,
+            string mobile,
+            int rewardLastOrderId)
+        {
+            if (string.IsNullOrWhiteSpace(mobile))
+                return 0;
+
+            MySqlCommand cmd =
+                new MySqlCommand(@"
+                    SELECT IFNULL(SUM(o.grand_total), 0)
+                    FROM inv_orders o
+                    INNER JOIN inv_customers c ON c.id = o.customer_id
+                    WHERE c.phone = @phone
+                      AND o.id > @lastRewardOrderId",
+                conn);
+
+            cmd.Parameters.AddWithValue("@phone", mobile.Trim());
+            cmd.Parameters.AddWithValue("@lastRewardOrderId", rewardLastOrderId);
+
+            return Round2(Convert.ToDecimal(cmd.ExecuteScalar()));
+        }
+
+        private decimal GetCurrentBillBeforeReward()
+        {
+            if (rewardApplied)
+                return CalculateCurrentBillWithReward(0);
+
+            return grandTotal > 0
+                ? grandTotal
+                : CalculateCurrentBillWithReward(0);
+        }
+
+        private decimal CalculateCurrentBillWithReward(decimal rewardDiscount)
+        {
+            decimal currentTotal = 0;
+
+            foreach (DataGridViewRow row in dgvRight.Rows)
+            {
+                if (row.IsNewRow)
+                    continue;
+
+                if (!decimal.TryParse(row.Cells[3].Value?.ToString(), out decimal price) ||
+                    !int.TryParse(row.Cells[4].Value?.ToString(), out int qty) ||
+                    !decimal.TryParse(row.Cells["GSTPercent"].Value?.ToString(), out decimal gstPercent))
+                {
+                    continue;
+                }
+
+                decimal discount;
+                if (IsManualDiscountRow(row))
+                {
+                    discount = GetCellDecimal(row, "Manual_Discount");
+                }
+                else
+                {
+                    discount =
+                        ClampDiscount(
+                            GetCellDecimal(row, "Auto_Discount") +
+                            rewardDiscount);
+                }
+
+                CalculateLineAmounts(
+                    price,
+                    gstPercent,
+                    discount,
+                    qty,
+                    out _,
+                    out _,
+                    out decimal lineTotal);
+
+                currentTotal += lineTotal;
+            }
+
+            return Round2(currentTotal);
+        }
+
+        private bool TryGetRewardRule(
+            MySqlConnection conn,
+            decimal amount,
+            out string membershipName,
+            out decimal discountPercent,
+            out decimal minPurchase)
+        {
+            membershipName = "";
+            discountPercent = 0;
+            minPurchase = 0;
+
+            MySqlCommand cmd =
+                new MySqlCommand(@"
+                    SELECT discount_percent,
+                           min_purchase
+                    FROM inv_reward_discount_rules
+                    WHERE min_purchase <= @amt
+                    AND is_active = 1
+                    ORDER BY min_purchase DESC
+                    LIMIT 1", conn);
+
+            cmd.Parameters.AddWithValue("@amt", amount);
+
+            using (var reader = cmd.ExecuteReader())
+            {
+                if (!reader.Read())
+                    return false;
+
+                discountPercent =
+                    Convert.ToDecimal(reader["discount_percent"]);
+                minPurchase =
+                    Convert.ToDecimal(reader["min_purchase"]);
+                membershipName =
+                    $"₹{minPurchase:N0}+ ({discountPercent:0.##}% off)";
+
+                return discountPercent > 0;
+            }
+        }
+
+        private void EnsureAppliedRewardStillEligible()
+        {
+            if (isLoadingHoldBill || !rewardApplied)
+                return;
+
+            string mobile = txtMobile.Text.Trim();
+            if (!IsValidMobile(mobile))
+            {
+                RemoveRewardDiscount();
+                return;
+            }
+
+            try
+            {
+                using (MySqlConnection conn = DB.GetConnection())
+                {
+                    conn.Open();
+
+                    TryGetRewardCustomerInfo(
+                        conn,
+                        mobile,
+                        out int customerId,
+                        out int rewardLastOrderId);
+
+                    decimal previousPurchase =
+                        GetPreviousRewardPurchase(
+                            conn,
+                            mobile,
+                            rewardLastOrderId);
+
+                    decimal currentBill =
+                        GetCurrentBillBeforeReward();
+                    decimal eligiblePurchase =
+                        Round2(previousPurchase + currentBill);
+
+                    if (!TryGetRewardRule(
+                            conn,
+                            eligiblePurchase,
+                            out _,
+                            out decimal eligibleRewardDiscount,
+                            out _) ||
+                        eligibleRewardDiscount != rewardDiscountPercent)
                     {
-                        customerCmd.Parameters.AddWithValue(
-                            "@phone",
-                            mobile);
-
-                        using (MySqlDataReader reader =
-                            customerCmd.ExecuteReader())
-                        {
-                            if (reader.Read())
-                            {
-                                customerId =
-                                    Convert.ToInt32(reader["id"]);
-
-                                rewardLastOrderId =
-                                    Convert.ToInt32(
-                                        reader["reward_last_order_id"]);
-                            }
-                        }
+                        rewardPurchaseAmount = eligiblePurchase;
+                        RemoveRewardDiscount();
+                        return;
                     }
 
-                    CalculateRewardDiscount(
+                    rewardPurchaseAmount = eligiblePurchase;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private bool CheckRewardDiscount()
+        {
+            try
+            {
+                string mobile = txtMobile.Text.Trim();
+                if (!IsValidMobile(mobile))
+                    return false;
+
+                using (MySqlConnection conn = DB.GetConnection())
+                {
+                    conn.Open();
+
+                    int rewardLastOrderId = 0;
+                    TryGetRewardCustomerInfo(
                         conn,
-                        customerId,
+                        mobile,
+                        out _,
+                        out rewardLastOrderId);
+
+                    return CalculateRewardDiscount(
+                        conn,
+                        mobile,
                         rewardLastOrderId);
                 }
             }
             catch (Exception ex)
             {
                 MessageBox.Show(ex.ToString());
+                return false;
             }
         }
 
-        private void CalculateRewardDiscount(MySqlConnection conn, int customerId, int rewardLastOrderId)
+        private bool CalculateRewardDiscount(
+            MySqlConnection conn,
+            string mobile,
+            int rewardLastOrderId)
         {
-            //if (customerId <= 0)
-            //    return;
+            decimal previousPurchase =
+                GetPreviousRewardPurchase(conn, mobile, rewardLastOrderId);
+            decimal currentBill = GetCurrentBillBeforeReward();
+            decimal eligiblePurchase =
+                Round2(previousPurchase + currentBill);
 
-            MySqlCommand cmd =
-                new MySqlCommand(@"
-                    SELECT IFNULL(
-                        SUM(grand_total),
-                        0
-                    )
-                    FROM inv_orders
-                    WHERE customer_id=@cid
-                    AND id > @lastRewardOrderId",
-                conn);
+            if (currentBill <= 0)
+                return false;
 
-            cmd.Parameters.AddWithValue("@cid", customerId);
+            if (!TryGetRewardRule(
+                    conn,
+                    eligiblePurchase,
+                    out string membershipName,
+                    out decimal rewardDiscount,
+                    out _))
+            {
+                return false;
+            }
 
-            cmd.Parameters.AddWithValue("@lastRewardOrderId", rewardLastOrderId);
-
-            decimal previousPurchase = Convert.ToDecimal(cmd.ExecuteScalar());
-
-            // Previous Purchase + Current Bill
-            decimal eligiblePurchase = previousPurchase + grandTotal;
-
+            currentMembership = membershipName;
             rewardPurchaseAmount = eligiblePurchase;
 
-            decimal rewardDiscount = GetRewardDiscount(conn, eligiblePurchase);
-
-            if (rewardDiscount <= 0)
-                return;
-
-            AskRewardRedemption(rewardDiscount, previousPurchase, grandTotal, eligiblePurchase);
+            AskRewardRedemption(
+                rewardDiscount,
+                previousPurchase,
+                currentBill,
+                eligiblePurchase);
+            return true;
         }
 
         private void RemoveRewardDiscount()
@@ -1211,36 +1395,6 @@ namespace BubbyPlanetShowroom
             currentMembership = "";
 
             RecalculateRowAmounts();
-        }
-
-        private decimal GetRewardDiscount(MySqlConnection conn, decimal amount)
-        {
-            MySqlCommand cmd =
-                new MySqlCommand(@"
-                    SELECT membership_name,
-                           discount_percent
-                    FROM inv_reward_discount_rules
-                    WHERE min_purchase <= @amt
-                    AND is_active = 1
-                    ORDER BY min_purchase DESC
-                    LIMIT 1", conn);
-
-            cmd.Parameters.AddWithValue("@amt", amount);
-
-            using (var reader = cmd.ExecuteReader())
-            {
-                if (reader.Read())
-                {
-                    currentMembership =
-                        reader["membership_name"]?.ToString() ?? "";
-
-                    return Convert.ToDecimal(
-                        reader["discount_percent"]);
-                }
-            }
-
-            currentMembership = "";
-            return 0;
         }
 
         private void AskRewardRedemption(
@@ -1568,13 +1722,14 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
 
                 decimal defaultDiscount = GetAutoDiscountPercent(conn, itemcode ?? "", currentCustomerIsStaff);
                 decimal currentRewardDiscount = rewardApplied ? rewardDiscountPercent : 0;
+                decimal effectiveDiscount = ClampDiscount(defaultDiscount + currentRewardDiscount);
                 //DebugDiscountDecision(itemcode ?? "", mainCategory ?? "", stockAddedOn, defaultDiscount);
                 int qty = 1;
 
                 CalculateLineAmounts(
                     finalPrice,
                     gstPercent,
-                    ClampDiscount(defaultDiscount + currentRewardDiscount),
+                    effectiveDiscount,
                     qty,
                     out decimal subtotal,
                     out decimal gstAmount,
@@ -1690,7 +1845,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                     CalculateLineAmounts(
                         finalPrice,
                         gstPercent,
-                        defaultDiscount,
+                        effectiveDiscount,
                         qty,
                         out subtotal,
                         out gstAmount,
@@ -1700,7 +1855,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
 
                     dgvRight.Rows.Add(
                         name,               // 0 Item
-                        ClampDiscount(defaultDiscount + currentRewardDiscount), // 1 Discount %
+                        effectiveDiscount, // 1 Discount %
                         size,               // 2 Size
                         finalPrice,         // 3 Price
                         qty,                // 4 Qty
@@ -1905,6 +2060,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
 
             CalculateReturnAmount();
 
+            EnsureAppliedRewardStillEligible();
             MaybeCheckRewardDiscount();
         }
 
@@ -2540,13 +2696,15 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                         rewardCmd.ExecuteNonQuery();
                     }
 
-                    // Print first; commit only if print succeeds
-
+                    
+                    // Uncomment for testing
                     //PrintPreviewDialog preview = new PrintPreviewDialog();
                     //preview.Document = printDocument;
                     //preview.Width = 1200;
                     //preview.Height = 800;
                     //preview.ShowDialog();
+
+                    // Uncomment for production
                     printDocument.Print();
 
                     transaction.Commit();
@@ -2987,7 +3145,11 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                     return;
 
                 if (row.Cells[4].Value == null)
+                {
+                    row.Cells[4].Value = 1;
+                    RecalculateRowAmounts();
                     return;
+                }
 
                 int qty;
 
@@ -2995,6 +3157,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 {
                     MessageBox.Show("Invalid Quantity");
                     row.Cells[4].Value = 1;
+                    RecalculateRowAmounts();
                     return;
                 }
 
@@ -3029,6 +3192,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                     {
                         MessageBox.Show("Stock not found ❌");
                         row.Cells[4].Value = 1;
+                        RecalculateRowAmounts();
                         return;
                     }
 
@@ -3284,15 +3448,45 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                     !decimal.TryParse(row.Cells[5].Value?.ToString(), out decimal gross) ||
                     !decimal.TryParse(row.Cells[6].Value?.ToString(), out decimal taxable) ||
                     !decimal.TryParse(row.Cells[7].Value?.ToString(), out decimal gst) ||
-                    !decimal.TryParse(row.Cells[8].Value?.ToString(), out decimal net))
+                    !decimal.TryParse(row.Cells[8].Value?.ToString(), out decimal net) ||
+                    !decimal.TryParse(row.Cells["GSTPercent"].Value?.ToString(), out decimal gstPercent))
                 {
                     MessageBox.Show("Invalid amount data detected in bill.");
                     return false;
                 }
 
-                if (price < 0 || gross < 0 || taxable < 0 || gst < 0 || net < 0)
+                decimal discount = GetCellDecimal(row, 1);
+
+                if (price < 0 || gross < 0 || taxable < 0 || gst < 0 || net < 0 || discount < 0)
                 {
                     MessageBox.Show("Negative amount detected in bill.");
+                    return false;
+                }
+
+                decimal expectedGross = Round2(price * qty);
+                CalculateLineAmounts(
+                    price,
+                    gstPercent,
+                    discount,
+                    qty,
+                    out decimal expectedTaxable,
+                    out decimal expectedGst,
+                    out decimal expectedLineNet);
+
+                if (Math.Abs(expectedGross - gross) > 0.01m ||
+                    Math.Abs(expectedTaxable - taxable) > 0.01m ||
+                    Math.Abs(expectedGst - gst) > 0.01m ||
+                    Math.Abs(expectedLineNet - net) > 0.01m)
+                {
+                    MessageBox.Show(
+                        $"Amount mismatch in item: {row.Cells[0].Value}\n" +
+                        $"Discount={discount}%\n" +
+                        $"Expected Taxable={expectedTaxable}\n" +
+                        $"Expected GST={expectedGst}\n" +
+                        $"Expected Net={expectedLineNet}\n" +
+                        $"Current Taxable={taxable}\n" +
+                        $"Current GST={gst}\n" +
+                        $"Current Net={net}");
                     return false;
                 }
 
