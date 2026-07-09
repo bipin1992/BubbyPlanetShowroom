@@ -1127,24 +1127,35 @@ namespace BubbyPlanetShowroom
 
         private decimal GetPreviousRewardPurchase(
             MySqlConnection conn,
-            int customerId,
+            string mobile,
             int rewardLastOrderId)
         {
+            if (string.IsNullOrWhiteSpace(mobile))
+                return 0;
+
             MySqlCommand cmd =
                 new MySqlCommand(@"
-                    SELECT IFNULL(
-                        SUM(grand_total),
-                        0
-                    )
-                    FROM inv_orders
-                    WHERE customer_id=@cid
-                    AND id > @lastRewardOrderId",
+                    SELECT IFNULL(SUM(o.grand_total), 0)
+                    FROM inv_orders o
+                    INNER JOIN inv_customers c ON c.id = o.customer_id
+                    WHERE c.phone = @phone
+                      AND o.id > @lastRewardOrderId",
                 conn);
 
-            cmd.Parameters.AddWithValue("@cid", customerId);
+            cmd.Parameters.AddWithValue("@phone", mobile.Trim());
             cmd.Parameters.AddWithValue("@lastRewardOrderId", rewardLastOrderId);
 
-            return Convert.ToDecimal(cmd.ExecuteScalar());
+            return Round2(Convert.ToDecimal(cmd.ExecuteScalar()));
+        }
+
+        private decimal GetCurrentBillBeforeReward()
+        {
+            if (rewardApplied)
+                return CalculateCurrentBillWithReward(0);
+
+            return grandTotal > 0
+                ? grandTotal
+                : CalculateCurrentBillWithReward(0);
         }
 
         private decimal CalculateCurrentBillWithReward(decimal rewardDiscount)
@@ -1204,8 +1215,7 @@ namespace BubbyPlanetShowroom
 
             MySqlCommand cmd =
                 new MySqlCommand(@"
-                    SELECT membership_name,
-                           discount_percent,
+                    SELECT discount_percent,
                            min_purchase
                     FROM inv_reward_discount_rules
                     WHERE min_purchase <= @amt
@@ -1220,65 +1230,15 @@ namespace BubbyPlanetShowroom
                 if (!reader.Read())
                     return false;
 
-                membershipName =
-                    reader["membership_name"]?.ToString() ?? "";
                 discountPercent =
                     Convert.ToDecimal(reader["discount_percent"]);
                 minPurchase =
                     Convert.ToDecimal(reader["min_purchase"]);
+                membershipName =
+                    $"₹{minPurchase:N0}+ ({discountPercent:0.##}% off)";
 
-                return true;
+                return discountPercent > 0;
             }
-        }
-
-        private bool TryGetStableRewardRule(
-            MySqlConnection conn,
-            decimal previousPurchase,
-            decimal currentBillBeforeReward,
-            out string membershipName,
-            out decimal rewardDiscount,
-            out decimal eligiblePurchase)
-        {
-            membershipName = "";
-            rewardDiscount = 0;
-            eligiblePurchase = previousPurchase + currentBillBeforeReward;
-
-            if (!TryGetRewardRule(
-                    conn,
-                    eligiblePurchase,
-                    out string candidateMembership,
-                    out decimal candidateDiscount,
-                    out _))
-            {
-                return false;
-            }
-
-            decimal currentBillAfterReward =
-                CalculateCurrentBillWithReward(candidateDiscount);
-            decimal eligibleAfterReward =
-                previousPurchase + currentBillAfterReward;
-
-            if (!TryGetRewardRule(
-                    conn,
-                    eligibleAfterReward,
-                    out string stableMembership,
-                    out decimal stableDiscount,
-                    out _))
-            {
-                eligiblePurchase = eligibleAfterReward;
-                return false;
-            }
-
-            if (stableDiscount != candidateDiscount)
-            {
-                eligiblePurchase = eligibleAfterReward;
-                return false;
-            }
-
-            membershipName = stableMembership;
-            rewardDiscount = stableDiscount;
-            eligiblePurchase = eligibleAfterReward;
-            return true;
         }
 
         private void EnsureAppliedRewardStillEligible()
@@ -1308,19 +1268,20 @@ namespace BubbyPlanetShowroom
                     decimal previousPurchase =
                         GetPreviousRewardPurchase(
                             conn,
-                            customerId,
+                            mobile,
                             rewardLastOrderId);
 
-                    decimal currentBillWithoutReward =
-                        CalculateCurrentBillWithReward(0);
+                    decimal currentBill =
+                        GetCurrentBillBeforeReward();
+                    decimal eligiblePurchase =
+                        Round2(previousPurchase + currentBill);
 
-                    if (!TryGetStableRewardRule(
+                    if (!TryGetRewardRule(
                             conn,
-                            previousPurchase,
-                            currentBillWithoutReward,
+                            eligiblePurchase,
                             out _,
                             out decimal eligibleRewardDiscount,
-                            out decimal eligiblePurchase) ||
+                            out _) ||
                         eligibleRewardDiscount != rewardDiscountPercent)
                     {
                         rewardPurchaseAmount = eligiblePurchase;
@@ -1341,20 +1302,23 @@ namespace BubbyPlanetShowroom
             try
             {
                 string mobile = txtMobile.Text.Trim();
+                if (!IsValidMobile(mobile))
+                    return false;
 
                 using (MySqlConnection conn = DB.GetConnection())
                 {
                     conn.Open();
 
+                    int rewardLastOrderId = 0;
                     TryGetRewardCustomerInfo(
                         conn,
                         mobile,
-                        out int customerId,
-                        out int rewardLastOrderId);
+                        out _,
+                        out rewardLastOrderId);
 
                     return CalculateRewardDiscount(
                         conn,
-                        customerId,
+                        mobile,
                         rewardLastOrderId);
                 }
             }
@@ -1365,21 +1329,26 @@ namespace BubbyPlanetShowroom
             }
         }
 
-        private bool CalculateRewardDiscount(MySqlConnection conn, int customerId, int rewardLastOrderId)
+        private bool CalculateRewardDiscount(
+            MySqlConnection conn,
+            string mobile,
+            int rewardLastOrderId)
         {
-            //if (customerId <= 0)
-            //    return false;
-
             decimal previousPurchase =
-                GetPreviousRewardPurchase(conn, customerId, rewardLastOrderId);
+                GetPreviousRewardPurchase(conn, mobile, rewardLastOrderId);
+            decimal currentBill = GetCurrentBillBeforeReward();
+            decimal eligiblePurchase =
+                Round2(previousPurchase + currentBill);
 
-            if (!TryGetStableRewardRule(
+            if (currentBill <= 0)
+                return false;
+
+            if (!TryGetRewardRule(
                     conn,
-                    previousPurchase,
-                    grandTotal,
+                    eligiblePurchase,
                     out string membershipName,
                     out decimal rewardDiscount,
-                    out decimal eligiblePurchase))
+                    out _))
             {
                 return false;
             }
@@ -1387,7 +1356,11 @@ namespace BubbyPlanetShowroom
             currentMembership = membershipName;
             rewardPurchaseAmount = eligiblePurchase;
 
-            AskRewardRedemption(rewardDiscount, previousPurchase, grandTotal, eligiblePurchase);
+            AskRewardRedemption(
+                rewardDiscount,
+                previousPurchase,
+                currentBill,
+                eligiblePurchase);
             return true;
         }
 
@@ -2723,13 +2696,15 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                         rewardCmd.ExecuteNonQuery();
                     }
 
-                    // Print first; commit only if print succeeds
-
+                    
+                    // Uncomment for testing
                     //PrintPreviewDialog preview = new PrintPreviewDialog();
                     //preview.Document = printDocument;
                     //preview.Width = 1200;
                     //preview.Height = 800;
                     //preview.ShowDialog();
+
+                    // Uncomment for production
                     printDocument.Print();
 
                     transaction.Commit();
