@@ -120,6 +120,7 @@ namespace BubbyPlanetShowroom
             AddMenuButton("Label");
             AddMenuButton("Receipt");
             AddMenuButton("Return");
+            AddMenuButton("Profile");
             AddMenuButton("Users");
             AddMenuButton("Revenue");
             AddMenuButton("Discount");
@@ -159,6 +160,7 @@ namespace BubbyPlanetShowroom
                     "Label" => new LabelPrint(),
                     "Receipt" => receiptPage ??= new Receipt(),
                     "Return" => returnPage ??= new Return(),
+                    "Profile" => new Profile(),
                     "Users" => new Users(),
                     "Revenue" => new Revenue(), // ✅ NEW
                     "Discount" => new DiscountManager(CurrentRole),
@@ -220,6 +222,12 @@ namespace BubbyPlanetShowroom
                 if (ctrl is Button btn)
                 {
                     btn.Visible = false;
+
+                    if (btn.Text == "Profile")
+                    {
+                        btn.Visible = true;
+                        continue;
+                    }
 
                     if (role == "Master Admin")
                     {
