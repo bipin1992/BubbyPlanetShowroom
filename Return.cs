@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
 using System.Drawing.Printing;
@@ -31,12 +32,66 @@ namespace BubbyPlanetShowroom
         DataGridView grid = new DataGridView();
 
         PrintDocument printDoc = new PrintDocument();
-        string receiptText = "";
         private bool isProcessingReturn = false;
+        private readonly List<ReturnReceiptLine> pendingPrintLines = new();
+        private decimal pendingTotalRefund = 0;
+
+        private sealed class ReturnReceiptLine
+        {
+            public string ItemName { get; set; } = "";
+            public int Qty { get; set; }
+            public decimal Refund { get; set; }
+        }
 
         private decimal Round2(decimal value)
         {
             return Math.Round(value, 2, MidpointRounding.AwayFromZero);
+        }
+
+        private decimal CalculateLineRefund(int qty, int returned, decimal netAmount, int returnQty)
+        {
+            if (returnQty <= 0)
+                return 0;
+
+            int remaining = qty - returned;
+            if (remaining <= 0)
+                return 0;
+
+            return Round2(netAmount / remaining * returnQty);
+        }
+
+        private void CommitGridEdits()
+        {
+            if (grid.IsCurrentCellInEditMode)
+                grid.EndEdit();
+
+            if (grid.CurrentCell != null && grid.CurrentCell.IsInEditMode)
+                grid.EndEdit();
+        }
+
+        private void RefreshAllRefundCells()
+        {
+            if (!grid.Columns.Contains("ReturnQty") || !grid.Columns.Contains("Refund"))
+                return;
+
+            foreach (DataGridViewRow row in grid.Rows)
+            {
+                if (row.IsNewRow)
+                    continue;
+
+                int returnQty = 0;
+                int.TryParse(row.Cells["ReturnQty"].Value?.ToString(), out returnQty);
+
+                int qty = Convert.ToInt32(row.Cells["qty"].Value);
+                int returned = 0;
+                int.TryParse(row.Cells["return_qty"].Value?.ToString(), out returned);
+
+                decimal netAmount = Convert.ToDecimal(row.Cells["net_amount"].Value);
+                decimal refund = CalculateLineRefund(qty, returned, netAmount, returnQty);
+                row.Cells["Refund"].Value = refund.ToString("0.00");
+            }
+
+            CalculateTotalRefund();
         }
 
         public Return()
@@ -200,7 +255,7 @@ namespace BubbyPlanetShowroom
             Controls.Add(infoPanel);
             Controls.Add(topPanel);
 
-            //txtOrderId.TextChanged += TxtOrderId_TextChanged;
+            txtOrderId.TextChanged += TxtOrderId_TextChanged;
 
             this.Load += (s, e) => txtOrderId.Focus();
             txtOrderId.KeyDown += txtOrderId_KeyDown;
@@ -238,240 +293,211 @@ namespace BubbyPlanetShowroom
 
             try
             {
-                using (MySqlConnection con = DB.GetConnection())
-                {
-                    con.Open();
-
-                    string orderQuery =
-                    @"SELECT 
-                        o.subtotal AS subtotal,
-                        o.total_tax AS tax,
-                        o.grand_total AS grand_total,
-                        o.date_added,
-                        c.first_name,
-                        c.sur_name,
-                        c.phone
-                    FROM inv_orders o
-                    JOIN inv_customers c ON c.id = o.customer_id
-                    WHERE o.id = @orderId";
-
-                    MySqlCommand cmd = new MySqlCommand(orderQuery, con);
-                    cmd.Parameters.AddWithValue("@orderId", parsedOrderId);
-
-                    using (MySqlDataReader dr = cmd.ExecuteReader())
-                    {
-                        if (dr.Read())
-                        {
-                            DateTime orderDate = Convert.ToDateTime(dr["date_added"]);
-                            string customerName = dr["first_name"] + " " + dr["sur_name"];
-
-                            lblCustomer.Text = "Customer : " + customerName;
-                            lblPhone.Text = "Phone : " + dr["phone"].ToString();
-                            lblDate.Text = "Date : " + orderDate.ToString("dd-MM-yyyy HH:mm:ss");
-
-                            decimal subtotal = Convert.ToDecimal(dr["subtotal"].ToString());
-                            decimal tax = Convert.ToDecimal(dr["tax"].ToString());
-                            decimal total = Convert.ToDecimal(dr["grand_total"].ToString());
-
-                            lblSubtotal.Text = "Subtotal : " + subtotal.ToString("0.00");
-                            lblTax.Text = "Tax : " + tax.ToString("0.00");
-                            lblTotal.Text = "Total : " + total.ToString("0.00");
-
-                            if (!IsReturnAllowedWithin7Days(orderDate))
-                            {
-                                MessageBox.Show("Return allowed only within 7 days. 8th day se return allowed nahi hai.");
-                                grid.Enabled = false;
-                                btnProcess.Enabled = false;
-                                btnReset.Enabled = true;
-                                btnReset.BackColor = ResetEnabledColor;
-                                return;
-                            }
-                        }
-                        else
-                        {
-                            MessageBox.Show("Order not found");
-                            return;
-                        }
-                    }
-
-                    // Load Items
-                    string itemQuery =
-                    @"SELECT
-                        od.id,
-                        od.item_id,
-                        i.item_code,
-                        i.item_name,
-                        od.qty,
-                        IFNULL(od.return_qty,0) return_qty,
-
-                        od.selling_price,
-                        od.gross_amount,
-
-                        od.discount_percent,
-                        od.discount_amount,
-
-                        od.taxable_amount,
-                        od.gst_amount,
-                        od.net_amount
-                    FROM inv_order_details od
-                    JOIN inv_items_master i ON i.id = od.item_id
-                    WHERE od.order_id = @orderId";
-
-                    MySqlDataAdapter da = new MySqlDataAdapter(itemQuery, con);
-                    da.SelectCommand.Parameters.AddWithValue("@orderId", parsedOrderId);
-
-                    DataTable dt = new DataTable();
-                    da.Fill(dt);
-
-                    bool hasReturnableItem = false;
-                    foreach (DataRow drItem in dt.Rows)
-                    {
-                        int qty = Convert.ToInt32(drItem["qty"]);
-                        int returned = Convert.ToInt32(drItem["return_qty"]);
-                        if (qty - returned > 0)
-                        {
-                            hasReturnableItem = true;
-                            break;
-                        }
-                    }
-                    if (!hasReturnableItem)
-                    {
-                        MessageBox.Show("All items are already fully returned for this order.");
-                        grid.DataSource = null;
-                        btnProcess.Enabled = false;
-                        btnReset.Enabled = true;
-                        btnReset.BackColor = ResetEnabledColor;
-                        return;
-                    }
-
-                    grid.DataSource = dt;
-
-                    grid.Columns["discount_percent"].HeaderText = "Disc %";
-
-                    grid.Columns["discount_percent"].AutoSizeMode =
-                        DataGridViewAutoSizeColumnMode.None;
-
-                    grid.Columns["discount_percent"].Width = 80;
-
-                    grid.Columns["discount_percent"].HeaderCell.Style.Alignment =
-                        DataGridViewContentAlignment.MiddleCenter;
-
-                    grid.Columns["discount_percent"].DefaultCellStyle.Alignment =
-                        DataGridViewContentAlignment.MiddleCenter;
-
-                    // Hide internal columns
-                    if (grid.Columns.Contains("id"))
-                        grid.Columns["id"].Visible = false;
-
-                    if (grid.Columns.Contains("item_id"))
-                        grid.Columns["item_id"].Visible = false;
-
-                    if (grid.Columns.Contains("item_code"))
-                        grid.Columns["item_code"].Visible = false;
-
-                    if (grid.Columns.Contains("gross_amount"))
-                        grid.Columns["gross_amount"].Visible = false;
-
-                    if (grid.Columns.Contains("discount_amount"))
-                        grid.Columns["discount_amount"].Visible = false;
-
-                    if (grid.Columns.Contains("taxable_amount"))
-                        grid.Columns["taxable_amount"].Visible = false;
-
-                    // Column captions
-                    grid.Columns["item_name"].HeaderText = "Item";
-                    grid.Columns["qty"].HeaderText = "Qty";
-                    grid.Columns["return_qty"].HeaderText = "Returned";
-                    grid.Columns["selling_price"].HeaderText = "Price";
-                    grid.Columns["discount_percent"].HeaderText = "Disc %";
-                    grid.Columns["gst_amount"].HeaderText = "GST";
-                    grid.Columns["net_amount"].HeaderText = "Net";
-
-                    // Display order
-                    grid.Columns["item_name"].DisplayIndex = 0;
-                    grid.Columns["qty"].DisplayIndex = 1;
-                    grid.Columns["return_qty"].DisplayIndex = 2;
-                    grid.Columns["selling_price"].DisplayIndex = 3;
-                    grid.Columns["discount_percent"].DisplayIndex = 4;
-                    grid.Columns["gst_amount"].DisplayIndex = 5;
-                    grid.Columns["net_amount"].DisplayIndex = 6;
-
-                    // Formats
-                    grid.Columns["selling_price"].DefaultCellStyle.Format = "0.00";
-                    grid.Columns["gst_amount"].DefaultCellStyle.Format = "0.00";
-                    grid.Columns["net_amount"].DefaultCellStyle.Format = "0.00";
-                    grid.Columns["discount_percent"].DefaultCellStyle.Format = "0.##";
-
-                    // Widths
-                    grid.Columns["item_name"].Width = 260;
-                    grid.Columns["qty"].Width = 70;
-                    grid.Columns["return_qty"].Width = 90;
-                    grid.Columns["selling_price"].Width = 90;
-                    grid.Columns["discount_percent"].Width = 80;
-                    grid.Columns["gst_amount"].Width = 90;
-                    grid.Columns["net_amount"].Width = 100;
-
-                    // Add ReturnQty column
-                    if (!grid.Columns.Contains("ReturnQty"))
-                    {
-                        DataGridViewTextBoxColumn col =
-                            new DataGridViewTextBoxColumn();
-
-                        col.Name = "ReturnQty";
-                        col.HeaderText = "Return Qty";
-
-                        grid.Columns.Add(col);
-                    }
-
-                    // Add Refund column
-                    if (!grid.Columns.Contains("Refund"))
-                    {
-                        DataGridViewTextBoxColumn col =
-                            new DataGridViewTextBoxColumn();
-
-                        col.Name = "Refund";
-                        col.HeaderText = "Refund";
-                        col.ReadOnly = true;
-
-                        grid.Columns.Add(col);
-                    }
-
-                    // Make all readonly
-                    foreach (DataGridViewColumn column in grid.Columns)
-                    {
-                        column.ReadOnly = true;
-                    }
-
-                    // Only ReturnQty editable
-                    grid.Columns["ReturnQty"].ReadOnly = false;
-
-                    // ReturnQty styling
-                    grid.Columns["ReturnQty"].HeaderCell.Style.BackColor =
-                        Color.FromArgb(0, 120, 215);
-
-                    grid.Columns["ReturnQty"].HeaderCell.Style.ForeColor =
-                        Color.White;
-
-                    grid.Columns["ReturnQty"].DefaultCellStyle.BackColor =
-                        Color.FromArgb(230, 240, 255);
-
-                    grid.Columns["ReturnQty"].DefaultCellStyle.SelectionBackColor =
-                        Color.FromArgb(180, 210, 255);
-
-                    grid.Columns["ReturnQty"].DefaultCellStyle.SelectionForeColor =
-                        Color.Black;
-
-                    grid.Enabled = true;
-                    btnProcess.Enabled = grid.Rows.Count > 0;
-                    btnReset.Enabled = true;
-                    btnReset.BackColor = ResetEnabledColor;
-
-                }
+                LoadOrder(parsedOrderId);
             }
             catch (Exception ex)
             {
                 MessageBox.Show(ex.Message);
             }
+        }
+
+        private void LoadOrder(int parsedOrderId)
+        {
+            using (MySqlConnection con = DB.GetConnection())
+            {
+                con.Open();
+
+                string orderQuery =
+                @"SELECT 
+                    o.subtotal AS subtotal,
+                    o.total_tax AS tax,
+                    o.grand_total AS grand_total,
+                    o.date_added,
+                    c.first_name,
+                    c.sur_name,
+                    c.phone
+                FROM inv_orders o
+                JOIN inv_customers c ON c.id = o.customer_id
+                WHERE o.id = @orderId";
+
+                MySqlCommand cmd = new MySqlCommand(orderQuery, con);
+                cmd.Parameters.AddWithValue("@orderId", parsedOrderId);
+
+                using (MySqlDataReader dr = cmd.ExecuteReader())
+                {
+                    if (dr.Read())
+                    {
+                        DateTime orderDate = Convert.ToDateTime(dr["date_added"]);
+                        string customerName = dr["first_name"] + " " + dr["sur_name"];
+
+                        lblCustomer.Text = "Customer : " + customerName;
+                        lblPhone.Text = "Phone : " + dr["phone"].ToString();
+                        lblDate.Text = "Date : " + orderDate.ToString("dd-MM-yyyy HH:mm:ss");
+
+                        decimal subtotal = Convert.ToDecimal(dr["subtotal"].ToString());
+                        decimal tax = Convert.ToDecimal(dr["tax"].ToString());
+                        decimal total = Convert.ToDecimal(dr["grand_total"].ToString());
+
+                        lblSubtotal.Text = "Subtotal : " + subtotal.ToString("0.00");
+                        lblTax.Text = "Tax : " + tax.ToString("0.00");
+                        lblTotal.Text = "Total : " + total.ToString("0.00");
+
+                        if (!IsReturnAllowedWithin7Days(orderDate))
+                        {
+                            MessageBox.Show("Return allowed only within 7 days. 8th day se return allowed nahi hai.");
+                            grid.DataSource = null;
+                            grid.Rows.Clear();
+                            grid.Columns.Clear();
+                            grid.Enabled = false;
+                            lblRefund.Text = "TOTAL REFUND : 0";
+                            btnProcess.Enabled = false;
+                            btnReset.Enabled = true;
+                            btnReset.BackColor = ResetEnabledColor;
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        MessageBox.Show("Order not found");
+                        return;
+                    }
+                }
+
+                string itemQuery =
+                @"SELECT
+                    od.id,
+                    od.item_id,
+                    i.item_code,
+                    i.item_name,
+                    od.qty,
+                    IFNULL(od.return_qty,0) return_qty,
+                    od.selling_price,
+                    od.gross_amount,
+                    od.discount_percent,
+                    od.discount_amount,
+                    od.taxable_amount,
+                    od.gst_amount,
+                    od.net_amount
+                FROM inv_order_details od
+                JOIN inv_items_master i ON i.id = od.item_id
+                WHERE od.order_id = @orderId";
+
+                MySqlDataAdapter da = new MySqlDataAdapter(itemQuery, con);
+                da.SelectCommand.Parameters.AddWithValue("@orderId", parsedOrderId);
+
+                DataTable dt = new DataTable();
+                da.Fill(dt);
+
+                bool hasReturnableItem = false;
+                foreach (DataRow drItem in dt.Rows)
+                {
+                    int qty = Convert.ToInt32(drItem["qty"]);
+                    int returned = Convert.ToInt32(drItem["return_qty"]);
+                    if (qty - returned > 0)
+                    {
+                        hasReturnableItem = true;
+                        break;
+                    }
+                }
+
+                if (!hasReturnableItem)
+                {
+                    MessageBox.Show("All items are already fully returned for this order.");
+                    grid.DataSource = null;
+                    btnProcess.Enabled = false;
+                    btnReset.Enabled = true;
+                    btnReset.BackColor = ResetEnabledColor;
+                    return;
+                }
+
+                BindOrderItemsGrid(dt);
+                grid.Enabled = true;
+                btnProcess.Enabled = grid.Rows.Count > 0;
+                btnReset.Enabled = true;
+                btnReset.BackColor = ResetEnabledColor;
+            }
+        }
+
+        private void BindOrderItemsGrid(DataTable dt)
+        {
+            grid.DataSource = dt;
+
+            grid.Columns["discount_percent"].HeaderText = "Disc %";
+            grid.Columns["discount_percent"].AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
+            grid.Columns["discount_percent"].Width = 80;
+            grid.Columns["discount_percent"].HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            grid.Columns["discount_percent"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+
+            if (grid.Columns.Contains("id"))
+                grid.Columns["id"].Visible = false;
+            if (grid.Columns.Contains("item_id"))
+                grid.Columns["item_id"].Visible = false;
+            if (grid.Columns.Contains("item_code"))
+                grid.Columns["item_code"].Visible = false;
+            if (grid.Columns.Contains("gross_amount"))
+                grid.Columns["gross_amount"].Visible = false;
+            if (grid.Columns.Contains("discount_amount"))
+                grid.Columns["discount_amount"].Visible = false;
+            if (grid.Columns.Contains("taxable_amount"))
+                grid.Columns["taxable_amount"].Visible = false;
+
+            grid.Columns["item_name"].HeaderText = "Item";
+            grid.Columns["qty"].HeaderText = "Qty";
+            grid.Columns["return_qty"].HeaderText = "Returned";
+            grid.Columns["selling_price"].HeaderText = "Price";
+            grid.Columns["discount_percent"].HeaderText = "Disc %";
+            grid.Columns["gst_amount"].HeaderText = "GST";
+            grid.Columns["net_amount"].HeaderText = "Net";
+
+            grid.Columns["item_name"].DisplayIndex = 0;
+            grid.Columns["qty"].DisplayIndex = 1;
+            grid.Columns["return_qty"].DisplayIndex = 2;
+            grid.Columns["selling_price"].DisplayIndex = 3;
+            grid.Columns["discount_percent"].DisplayIndex = 4;
+            grid.Columns["gst_amount"].DisplayIndex = 5;
+            grid.Columns["net_amount"].DisplayIndex = 6;
+
+            grid.Columns["selling_price"].DefaultCellStyle.Format = "0.00";
+            grid.Columns["gst_amount"].DefaultCellStyle.Format = "0.00";
+            grid.Columns["net_amount"].DefaultCellStyle.Format = "0.00";
+            grid.Columns["discount_percent"].DefaultCellStyle.Format = "0.##";
+
+            grid.Columns["item_name"].Width = 260;
+            grid.Columns["qty"].Width = 70;
+            grid.Columns["return_qty"].Width = 90;
+            grid.Columns["selling_price"].Width = 90;
+            grid.Columns["discount_percent"].Width = 80;
+            grid.Columns["gst_amount"].Width = 90;
+            grid.Columns["net_amount"].Width = 100;
+
+            if (!grid.Columns.Contains("ReturnQty"))
+            {
+                DataGridViewTextBoxColumn col = new DataGridViewTextBoxColumn();
+                col.Name = "ReturnQty";
+                col.HeaderText = "Return Qty";
+                grid.Columns.Add(col);
+            }
+
+            if (!grid.Columns.Contains("Refund"))
+            {
+                DataGridViewTextBoxColumn col = new DataGridViewTextBoxColumn();
+                col.Name = "Refund";
+                col.HeaderText = "Refund";
+                col.ReadOnly = true;
+                grid.Columns.Add(col);
+            }
+
+            foreach (DataGridViewColumn column in grid.Columns)
+                column.ReadOnly = true;
+
+            grid.Columns["ReturnQty"].ReadOnly = false;
+            grid.Columns["ReturnQty"].HeaderCell.Style.BackColor = Color.FromArgb(0, 120, 215);
+            grid.Columns["ReturnQty"].HeaderCell.Style.ForeColor = Color.White;
+            grid.Columns["ReturnQty"].DefaultCellStyle.BackColor = Color.FromArgb(230, 240, 255);
+            grid.Columns["ReturnQty"].DefaultCellStyle.SelectionBackColor = Color.FromArgb(180, 210, 255);
+            grid.Columns["ReturnQty"].DefaultCellStyle.SelectionForeColor = Color.Black;
+
+            lblRefund.Text = "TOTAL REFUND : 0";
         }
 
         private void Grid_CellEndEdit(object sender, DataGridViewCellEventArgs e)
@@ -507,22 +533,16 @@ namespace BubbyPlanetShowroom
 
                 int allowed = qty - returned;
 
-                // validation
                 if (returnQty > allowed)
                 {
                     MessageBox.Show("Return qty exceeds allowed limit");
                     row.Cells["ReturnQty"].Value = 0;
                     row.Cells["Refund"].Value = 0;
+                    CalculateTotalRefund();
                     return;
                 }
 
-                // ✅ FIX HERE
-                int remaining = qty - returned;
-
-                decimal perItem = remaining == 0 ? 0 : total / remaining;
-
-                decimal refund = Round2(perItem * returnQty);
-
+                decimal refund = CalculateLineRefund(qty, returned, total, returnQty);
                 row.Cells["Refund"].Value = refund.ToString("0.00");
 
                 CalculateTotalRefund();
@@ -564,22 +584,24 @@ namespace BubbyPlanetShowroom
                 return;
             }
 
-            bool hasReturn = false;
+            CommitGridEdits();
+            RefreshAllRefundCells();
 
+            bool hasReturn = false;
             foreach (DataGridViewRow row in grid.Rows)
             {
-                if (row.Cells["ReturnQty"].Value != null)
+                if (row.IsNewRow)
+                    continue;
+
+                if (row.Cells["ReturnQty"].Value != null &&
+                    int.TryParse(row.Cells["ReturnQty"].Value.ToString(), out int qty) &&
+                    qty > 0)
                 {
-                    int qty;
-                    if (int.TryParse(row.Cells["ReturnQty"].Value.ToString(), out qty) && qty > 0)
-                    {
-                        hasReturn = true;
-                        break;
-                    }
+                    hasReturn = true;
+                    break;
                 }
             }
 
-            // ❌ STOP EVERYTHING
             if (!hasReturn)
             {
                 MessageBox.Show("Please enter return quantity first ❌");
@@ -588,101 +610,102 @@ namespace BubbyPlanetShowroom
 
             isProcessingReturn = true;
             btnProcess.Enabled = false;
+            bool returnCompleted = false;
+            pendingPrintLines.Clear();
+            pendingTotalRefund = 0;
+
             try
             {
                 using (MySqlConnection con = DB.GetConnection())
                 {
                     con.Open();
                     using MySqlTransaction transaction = con.BeginTransaction();
-
-                    decimal totalRefund = 0;
-                    int orderId = 0;
-
-                    foreach (DataGridViewRow row in grid.Rows)
+                    try
                     {
-                        if (row.IsNewRow) continue;
+                        decimal totalRefund = 0;
+                        int orderId = parsedOrderId;
 
-                        int qty = Convert.ToInt32(row.Cells["qty"].Value);
-
-                        int returnedAlready = 0;
-                        int.TryParse(row.Cells["return_qty"].Value?.ToString(), out returnedAlready);
-
-                        int returnNow = 0;
-                        int.TryParse(row.Cells["ReturnQty"].Value?.ToString(), out returnNow);
-
-                        decimal gross = Convert.ToDecimal(row.Cells["gross_amount"].Value);
-
-                        decimal discountAmount =
-                            Convert.ToDecimal(row.Cells["discount_amount"].Value);
-
-                        decimal total =
-                            Convert.ToDecimal(row.Cells["net_amount"].Value);
-
-                        decimal subtotalCurrent =
-                            Convert.ToDecimal(row.Cells["taxable_amount"].Value);
-
-                        decimal tax =
-                            Convert.ToDecimal(row.Cells["gst_amount"].Value);
-
-                        string itemCode = row.Cells["item_code"].Value?.ToString() ?? "";
-
-                        int detailId = Convert.ToInt32(row.Cells["id"].Value);
-                        orderId = parsedOrderId;
-
-                    // ✅ VALIDATION
-                        if (returnedAlready + returnNow > qty)
+                        foreach (DataGridViewRow row in grid.Rows)
                         {
-                            MessageBox.Show("Return exceeds quantity");
-                            return;
-                        }
+                            if (row.IsNewRow)
+                                continue;
 
-                        if (returnNow > 0)
-                        {
-                            int newReturnQty = returnedAlready + returnNow;
+                            int returnNow = 0;
+                            int.TryParse(row.Cells["ReturnQty"].Value?.ToString(), out returnNow);
+                            if (returnNow <= 0)
+                                continue;
 
-                            int currentRemaining = qty - returnedAlready;   // IMPORTANT
-                            int newRemaining = qty - newReturnQty;
+                            int detailId = Convert.ToInt32(row.Cells["id"].Value);
+                            string itemName = row.Cells["item_name"].Value?.ToString() ?? "";
+
+                            int qty;
+                            int returnedAlready;
+                            decimal gross;
+                            decimal discountAmount;
+                            decimal total;
+                            decimal subtotalCurrent;
+                            decimal tax;
+                            string itemCode;
+
+                            using (MySqlCommand fetchCmd = new MySqlCommand(@"
+                                SELECT
+                                    od.qty,
+                                    IFNULL(od.return_qty, 0) AS return_qty,
+                                    od.gross_amount,
+                                    od.discount_amount,
+                                    od.taxable_amount,
+                                    od.gst_amount,
+                                    od.net_amount,
+                                    i.item_code
+                                FROM inv_order_details od
+                                JOIN inv_items_master i ON i.id = od.item_id
+                                WHERE od.id = @id
+                                FOR UPDATE", con, transaction))
+                            {
+                                fetchCmd.Parameters.AddWithValue("@id", detailId);
+                                using MySqlDataReader detailReader = fetchCmd.ExecuteReader();
+                                if (!detailReader.Read())
+                                    throw new Exception("Order item not found while processing return.");
+
+                                qty = Convert.ToInt32(detailReader["qty"]);
+                                returnedAlready = Convert.ToInt32(detailReader["return_qty"]);
+                                gross = Convert.ToDecimal(detailReader["gross_amount"]);
+                                discountAmount = Convert.ToDecimal(detailReader["discount_amount"]);
+                                total = Convert.ToDecimal(detailReader["net_amount"]);
+                                subtotalCurrent = Convert.ToDecimal(detailReader["taxable_amount"]);
+                                tax = Convert.ToDecimal(detailReader["gst_amount"]);
+                                itemCode = detailReader["item_code"]?.ToString() ?? "";
+                            }
+
+                            if (returnedAlready + returnNow > qty)
+                            {
+                                MessageBox.Show("Return exceeds quantity. Order may have changed. Please search again.");
+                                transaction.Rollback();
+                                return;
+                            }
+
+                            int currentRemaining = qty - returnedAlready;
                             if (currentRemaining <= 0)
                                 continue;
 
-                            // paid amount proportion after discount/GST
-                            decimal perItem =
-                                total / currentRemaining;
+                            int newReturnQty = returnedAlready + returnNow;
+                            int newRemaining = qty - newReturnQty;
 
-                            decimal newTotal =
-                                Round2(perItem * newRemaining);
-
-                            decimal taxPerItem =
-                                tax / currentRemaining;
-
-                            decimal newTax =
-                                Round2(taxPerItem * newRemaining);
-
-                            decimal subtotalPerItem =
-                                subtotalCurrent / currentRemaining;
-
-                            decimal newSubtotal =
-                                Round2(subtotalPerItem * newRemaining);
-
-                            decimal grossPerItem =
-                                gross / currentRemaining;
-
-                            decimal newGross =
-                                Round2(grossPerItem * newRemaining);
-
-                            decimal discountPerItem =
-                                discountAmount / currentRemaining;
-
-                            decimal newDiscount =
-                                Round2(discountPerItem * newRemaining);
-
-                            // refund
+                            decimal perItem = total / currentRemaining;
+                            decimal newTotal = Round2(perItem * newRemaining);
+                            decimal taxPerItem = tax / currentRemaining;
+                            decimal newTax = Round2(taxPerItem * newRemaining);
+                            decimal subtotalPerItem = subtotalCurrent / currentRemaining;
+                            decimal newSubtotal = Round2(subtotalPerItem * newRemaining);
+                            decimal grossPerItem = gross / currentRemaining;
+                            decimal newGross = Round2(grossPerItem * newRemaining);
+                            decimal discountPerItem = discountAmount / currentRemaining;
+                            decimal newDiscount = Round2(discountPerItem * newRemaining);
                             decimal refund = Round2(perItem * returnNow);
                             totalRefund += refund;
 
-                        // ✅ UPDATE order_details (FULL CORRECT)
-                            MySqlCommand cmd = new MySqlCommand(@"
-                            UPDATE inv_order_details
+                            using MySqlCommand cmd = new MySqlCommand(@"
+                                UPDATE inv_order_details
                                 SET
                                     return_qty = @rqty,
                                     gross_amount = @gross,
@@ -691,84 +714,87 @@ namespace BubbyPlanetShowroom
                                     gst_amount = @tax,
                                     net_amount = @total
                                 WHERE id = @id", con, transaction);
-
                             cmd.Parameters.AddWithValue("@rqty", newReturnQty);
-
                             cmd.Parameters.AddWithValue("@gross", newGross);
-
                             cmd.Parameters.AddWithValue("@disc", newDiscount);
-
                             cmd.Parameters.AddWithValue("@sub", newSubtotal);
-
                             cmd.Parameters.AddWithValue("@tax", newTax);
-
                             cmd.Parameters.AddWithValue("@total", newTotal);
-
                             cmd.Parameters.AddWithValue("@id", detailId);
-
                             cmd.ExecuteNonQuery();
 
-                            MySqlCommand stockCmd = new MySqlCommand(@"
-                    UPDATE inv_stock
-                    SET quantity = quantity + @qty,
-                        last_updated = NOW()
-                    WHERE item_code = @code", con, transaction);
-
+                            using MySqlCommand stockCmd = new MySqlCommand(@"
+                                UPDATE inv_stock
+                                SET quantity = quantity + @qty,
+                                    last_updated = NOW()
+                                WHERE LOWER(TRIM(item_code)) = LOWER(TRIM(@code))", con, transaction);
                             stockCmd.Parameters.AddWithValue("@qty", returnNow);
                             stockCmd.Parameters.AddWithValue("@code", itemCode);
                             int stockRows = stockCmd.ExecuteNonQuery();
                             if (stockRows == 0)
                                 throw new Exception($"Stock update failed for returned item: {itemCode}");
+
+                            pendingPrintLines.Add(new ReturnReceiptLine
+                            {
+                                ItemName = itemName,
+                                Qty = returnNow,
+                                Refund = refund
+                            });
                         }
+
+                        decimal subtotal = 0, taxTotal = 0, grandTotal = 0, totalDiscount = 0;
+                        using (MySqlCommand cmd2 = new MySqlCommand(@"
+                            SELECT
+                                IFNULL(SUM(taxable_amount),0),
+                                IFNULL(SUM(gst_amount),0),
+                                IFNULL(SUM(net_amount),0),
+                                IFNULL(SUM(discount_amount),0)
+                            FROM inv_order_details
+                            WHERE order_id = @oid", con, transaction))
+                        {
+                            cmd2.Parameters.AddWithValue("@oid", orderId);
+                            using MySqlDataReader dr = cmd2.ExecuteReader();
+                            if (dr.Read())
+                            {
+                                subtotal = dr.GetDecimal(0);
+                                taxTotal = dr.GetDecimal(1);
+                                grandTotal = dr.GetDecimal(2);
+                                totalDiscount = dr.GetDecimal(3);
+                            }
+                        }
+
+                        using MySqlCommand cmd3 = new MySqlCommand(@"
+                            UPDATE inv_orders
+                            SET
+                                subtotal = @sub,
+                                total_discount = @disc,
+                                total_tax = @tax,
+                                grand_total = @gt,
+                                date_updated = NOW()
+                            WHERE id = @id", con, transaction);
+                        cmd3.Parameters.AddWithValue("@sub", Round2(subtotal));
+                        cmd3.Parameters.AddWithValue("@disc", Round2(totalDiscount));
+                        cmd3.Parameters.AddWithValue("@tax", Round2(taxTotal));
+                        cmd3.Parameters.AddWithValue("@gt", Round2(grandTotal));
+                        cmd3.Parameters.AddWithValue("@id", orderId);
+                        cmd3.ExecuteNonQuery();
+
+                        transaction.Commit();
+                        pendingTotalRefund = totalRefund;
+                        returnCompleted = true;
+                        MessageBox.Show("Return Completed Successfully\n\nTotal Refund Amount: ₹ " + totalRefund.ToString("0.00"));
                     }
-
-                // ✅ UPDATE orders table (SUM based)
-                    MySqlCommand cmd2 = new MySqlCommand(@"
-                    SELECT
-                    IFNULL(SUM(taxable_amount),0),
-                    IFNULL(SUM(gst_amount),0),
-                    IFNULL(SUM(net_amount),0),
-                    IFNULL(SUM(discount_amount),0)
-                    FROM inv_order_details 
-                    WHERE order_id = @oid", con, transaction);
-
-                    cmd2.Parameters.AddWithValue("@oid", orderId);
-
-                    MySqlDataReader dr = cmd2.ExecuteReader();
-
-                    decimal subtotal = 0, taxTotal = 0, grandTotal = 0, totalDiscount = 0;
-
-                    if (dr.Read())
+                    catch
                     {
-                        subtotal = dr.GetDecimal(0);
-                        taxTotal = dr.GetDecimal(1);
-                        grandTotal = dr.GetDecimal(2);
-                        totalDiscount = dr.GetDecimal(3);
+                        try { transaction.Rollback(); } catch { }
+                        throw;
                     }
-                    dr.Close();
-
-                // ✅ UPDATE orders
-                    MySqlCommand cmd3 = new MySqlCommand(@"
-            UPDATE inv_orders 
-            SET 
-                subtotal = @sub,
-                total_discount = @disc,
-                total_tax = @tax,
-                grand_total = @gt,
-                date_updated = NOW()
-            WHERE id = @id", con, transaction);
-
-                    cmd3.Parameters.AddWithValue("@sub", Round2(subtotal));
-                    cmd3.Parameters.AddWithValue("@disc", Round2(totalDiscount));
-                    cmd3.Parameters.AddWithValue("@tax", Round2(taxTotal));
-                    cmd3.Parameters.AddWithValue("@gt", Round2(grandTotal));
-                    cmd3.Parameters.AddWithValue("@id", orderId);
-
-                    cmd3.ExecuteNonQuery();
-                    transaction.Commit();
-
-                    MessageBox.Show("Return Completed Successfully\n\nTotal Refund Amount: ₹ " + totalRefund.ToString("0.00"));
                 }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Return failed: " + ex.Message);
+                return;
             }
             finally
             {
@@ -776,23 +802,37 @@ namespace BubbyPlanetShowroom
                 btnProcess.Enabled = grid != null && grid.Enabled && grid.Rows.Count > 0;
             }
 
-
-            //GenerateReceipt();
-
-            // Dynamic height based on actual printable return lines
-            int dynamicHeight = CalculateReturnPrintHeight();
-
-            PaperSize customSize = new PaperSize("Custom", 300, dynamicHeight);
-            printDoc.DefaultPageSettings.PaperSize = customSize;
-            PrinterRouting.ApplyReceiptReturnPrinter(printDoc);
-            if (!printDoc.PrinterSettings.IsValid)
-            {
-                MessageBox.Show("No valid receipt/return printer found. Please install/select printer.");
+            if (!returnCompleted)
                 return;
+
+            try
+            {
+                int dynamicHeight = CalculateReturnPrintHeight();
+                PaperSize customSize = new PaperSize("Custom", 300, dynamicHeight);
+                printDoc.DefaultPageSettings.PaperSize = customSize;
+                PrinterRouting.ApplyReceiptReturnPrinter(printDoc);
+                if (!printDoc.PrinterSettings.IsValid)
+                {
+                    MessageBox.Show("Return saved, but no valid receipt/return printer found.");
+                }
+                else
+                {
+                    printDoc.Print();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Return saved, but receipt print failed: " + ex.Message);
             }
 
-            // 🔥 DIRECT PRINT (no preview)
-            printDoc.Print();
+            try
+            {
+                LoadOrder(parsedOrderId);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Return saved, but order reload failed: " + ex.Message);
+            }
         }
 
         private void PrintDoc_PrintPage(object sender, PrintPageEventArgs e)
@@ -851,7 +891,11 @@ namespace BubbyPlanetShowroom
                                .Trim();
             if (string.IsNullOrWhiteSpace(customer))
                 customer = "Walk-in Customer";
-            string phone = (lblPhone.Text ?? "").Replace("Mobile:", "").Trim();
+            string phone = (lblPhone.Text ?? "")
+                .Replace("Mobile:", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("Phone :", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("Phone:", "", StringComparison.OrdinalIgnoreCase)
+                .Trim();
             g.DrawString("Customer: " + customer, font, Brushes.Black, 5, y);
             y += 13;
             g.DrawString(phone, font, Brushes.Black, 5, y);
@@ -868,42 +912,31 @@ namespace BubbyPlanetShowroom
 
             g.DrawString("-----------------------------------------------", font, Brushes.Black, 5, y);
             y += 10;
-            decimal totalRefundAmount = 0m;
+            decimal totalRefundAmount = pendingTotalRefund;
 
-            foreach (DataGridViewRow row in grid.Rows)
+            foreach (ReturnReceiptLine line in pendingPrintLines)
             {
-                if (row.Cells["ReturnQty"].Value != null)
+                string name = line.ItemName;
+                int qty = line.Qty;
+                decimal refund = line.Refund;
+
+                if (name.Length > 18)
                 {
-                    int qty;
-                    if (int.TryParse(row.Cells["ReturnQty"].Value.ToString(), out qty) && qty > 0)
-                    {
-                        string name = row.Cells["item_name"].Value.ToString();
-                        decimal refund = Convert.ToDecimal(row.Cells["Refund"].Value);
-                        totalRefundAmount += refund;
+                    string line1 = name.Substring(0, 18);
+                    string line2 = name.Substring(18);
 
-                        // 🔥 Handle long name (wrap)
-                        if (name.Length > 18)
-                        {
-                            string line1 = name.Substring(0, 18);
-                            string line2 = name.Substring(18);
-
-                            g.DrawString(line1, font, Brushes.Black, 5, y);
-                            y += 12;
-
-                            g.DrawString(line2, font, Brushes.Black, 5, y);
-                        }
-                        else
-                        {
-                            g.DrawString(name, font, Brushes.Black, 5, y);
-                        }
-
-                        // 👉 FIXED POSITION (no overlap)
-                        g.DrawString(qty.ToString(), font, Brushes.Black, 160, y);
-                        g.DrawString(refund.ToString("0.00"), font, Brushes.Black, 220, y);
-
-                        y += 18;
-                    }
+                    g.DrawString(line1, font, Brushes.Black, 5, y);
+                    y += 12;
+                    g.DrawString(line2, font, Brushes.Black, 5, y);
                 }
+                else
+                {
+                    g.DrawString(name, font, Brushes.Black, 5, y);
+                }
+
+                g.DrawString(qty.ToString(), font, Brushes.Black, 160, y);
+                g.DrawString(refund.ToString("0.00"), font, Brushes.Black, 220, y);
+                y += 18;
             }
 
             y += 10;
@@ -949,24 +982,13 @@ namespace BubbyPlanetShowroom
 
         private int CalculateReturnPrintHeight()
         {
-            // Header + table labels + footer space
             int baseHeight = 290;
             int perLineHeight = 18;
             int printableLines = 0;
 
-            foreach (DataGridViewRow row in grid.Rows)
+            foreach (ReturnReceiptLine line in pendingPrintLines)
             {
-                if (row.IsNewRow)
-                    continue;
-
-                if (row.Cells["ReturnQty"].Value == null)
-                    continue;
-
-                if (!int.TryParse(row.Cells["ReturnQty"].Value.ToString(), out int qty) || qty <= 0)
-                    continue;
-
-                string name = row.Cells["item_name"].Value?.ToString() ?? "";
-                // If long name, print in two lines
+                string name = line.ItemName ?? "";
                 printableLines += name.Length > 18 ? 2 : 1;
             }
 
