@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Data;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using MySql.Data.MySqlClient;
 
@@ -8,6 +9,14 @@ namespace BubbyPlanetShowroom
 {
     public class Selling : UserControl
     {
+        private static readonly Color PageBg = Color.FromArgb(241, 245, 249);
+        private static readonly Color Slate = Color.FromArgb(15, 23, 42);
+        private static readonly Color HeaderBg = Color.FromArgb(30, 41, 59);
+        private static readonly Color Teal = Color.FromArgb(13, 148, 136);
+        private static readonly Color Sky = Color.FromArgb(14, 165, 233);
+        private static readonly Color Muted = Color.FromArgb(100, 116, 139);
+        private static readonly Color PrimaryBlue = Color.FromArgb(37, 99, 235);
+
         private Label lblTodaySale;
         private Label lblTodayOrders;
 
@@ -36,96 +45,159 @@ namespace BubbyPlanetShowroom
 
         private void InitializeUI()
         {
-            this.Dock = DockStyle.Fill;
-            this.BackColor = Color.FromArgb(241, 245, 249);
+            Dock = DockStyle.Fill;
+            BackColor = PageBg;
+            Padding = new Padding(12);
 
-            TableLayoutPanel main = new TableLayoutPanel();
-            main.Dock = DockStyle.Fill;
-            main.RowCount = 3;
-            main.ColumnCount = 1;
-
-            main.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));
-            main.RowStyles.Add(new RowStyle(SizeType.Percent, 45));
-            main.RowStyles.Add(new RowStyle(SizeType.Percent, 55));
-
+            TableLayoutPanel main = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 4,
+                BackColor = PageBg,
+                Margin = new Padding(0),
+                Padding = new Padding(0)
+            };
+            main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            main.RowStyles.Add(new RowStyle(SizeType.Absolute, 78f));   // page header (title + subtitle)
+            main.RowStyles.Add(new RowStyle(SizeType.Absolute, 118f));  // summary + filters
+            main.RowStyles.Add(new RowStyle(SizeType.Percent, 45f));    // orders
+            main.RowStyles.Add(new RowStyle(SizeType.Percent, 55f));    // details
             Controls.Add(main);
 
-            // Top Panel
-            Panel topPanel = new Panel();
-            topPanel.Dock = DockStyle.Fill;
-
-            cmbFilter = new ComboBox();
-            cmbFilter.DropDownStyle = ComboBoxStyle.DropDownList;
-            cmbFilter.Items.AddRange(new string[]
+            // ----- Page header -----
+            Panel header = CreateCard();
+            header.Margin = new Padding(0, 0, 0, 8);
+            header.Padding = new Padding(0);
+            header.Paint += (_, e) =>
             {
-    "Today",
-    "Weekly",
-    "Monthly",
-    "Yearly",
-    "Custom"
-            });
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using LinearGradientBrush brush = new LinearGradientBrush(
+                    header.ClientRectangle, Teal, Sky, LinearGradientMode.Horizontal);
+                e.Graphics.FillRectangle(brush, header.ClientRectangle);
+                using Font titleFont = new Font("Segoe UI", 15f, FontStyle.Bold);
+                TextRenderer.DrawText(e.Graphics, "Selling Report", titleFont,
+                    new Rectangle(16, 12, 320, 28), Color.White,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                using Font hintFont = new Font("Segoe UI", 8.5f);
+                TextRenderer.DrawText(e.Graphics, "Filter sales  ·  open an order to view item details", hintFont,
+                    new Rectangle(16, 40, 480, 20), Color.FromArgb(204, 251, 241),
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            };
+
+            // ----- Summary + filters -----
+            Panel topPanel = CreateCard();
+            topPanel.Margin = new Padding(0, 0, 0, 10);
+            topPanel.Padding = new Padding(12, 10, 12, 10);
+
+            TableLayoutPanel topLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 1,
+                BackColor = Color.White
+            };
+            topLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 420f));
+            topLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+
+            // Summary cards
+            TableLayoutPanel summaryRow = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 1,
+                BackColor = Color.White,
+                Margin = new Padding(0),
+                Padding = new Padding(0, 0, 8, 0)
+            };
+            summaryRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+            summaryRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+
+            lblTodaySale = new Label { Text = "Sale : ₹0.00" };
+            lblTodayOrders = new Label { Text = "Orders : 0" };
+            summaryRow.Controls.Add(CreateStatCard("TOTAL SALE", lblTodaySale, Color.FromArgb(167, 243, 208), Teal), 0, 0);
+            summaryRow.Controls.Add(CreateStatCard("TOTAL ORDERS", lblTodayOrders, Color.FromArgb(186, 230, 253), Sky), 1, 0);
+
+            // Filters
+            Panel filterPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(248, 250, 252), Padding = new Padding(12, 8, 12, 8) };
+
+            Label lblPeriod = MakeTinyLabel("PERIOD", 8, 4);
+            cmbFilter = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Location = new Point(8, 24),
+                Width = 110,
+                Font = new Font("Segoe UI", 9.5f),
+                FlatStyle = FlatStyle.Flat
+            };
+            cmbFilter.Items.AddRange(new object[] { "Today", "Weekly", "Monthly", "Yearly", "Custom" });
             cmbFilter.SelectedIndex = 0;
-            cmbFilter.Location = new Point(20, 60);
-            cmbFilter.Width = 120;
 
-            topPanel.Controls.Add(cmbFilter);
+            Label lblUser = MakeTinyLabel("USER", 130, 4);
+            cmbUser = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Location = new Point(130, 24),
+                Width = 130,
+                Font = new Font("Segoe UI", 9.5f),
+                FlatStyle = FlatStyle.Flat
+            };
 
-            cmbUser = new ComboBox();
-            cmbUser.DropDownStyle = ComboBoxStyle.DropDownList;
-            cmbUser.Location = new Point(150, 55);
-            cmbUser.Width = 150;
+            Label lblFrom = MakeTinyLabel("FROM", 272, 4);
+            dtFrom = new DateTimePicker
+            {
+                Format = DateTimePickerFormat.Short,
+                Location = new Point(272, 24),
+                Width = 110,
+                Font = new Font("Segoe UI", 9.5f)
+            };
 
-            topPanel.Controls.Add(cmbUser);
+            Label lblTo = MakeTinyLabel("TO", 394, 4);
+            dtTo = new DateTimePicker
+            {
+                Format = DateTimePickerFormat.Short,
+                Location = new Point(394, 24),
+                Width = 110,
+                Font = new Font("Segoe UI", 9.5f)
+            };
 
-            dtFrom = new DateTimePicker();
-            dtFrom.Format = DateTimePickerFormat.Short;
-            dtFrom.Location = new Point(320, 60);
-
-            topPanel.Controls.Add(dtFrom);
-
-            dtTo = new DateTimePicker();
-            dtTo.Format = DateTimePickerFormat.Short;
-            dtTo.Location = new Point(500, 60);
-
-            topPanel.Controls.Add(dtTo);
-
-            btnSearch = new Button();
-            btnSearch.Text = "Search";
-            btnSearch.Location = new Point(680, 58);
-            btnSearch.Width = 100;
-
+            btnSearch = new Button
+            {
+                Text = "Search",
+                Location = new Point(518, 20),
+                Size = new Size(100, 32),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = PrimaryBlue,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                UseVisualStyleBackColor = false
+            };
+            btnSearch.FlatAppearance.BorderSize = 0;
             btnSearch.Click += (s, e) =>
             {
                 LoadSummary();
                 LoadOrders();
             };
 
-            topPanel.Controls.Add(btnSearch);
+            filterPanel.Controls.Add(lblPeriod);
+            filterPanel.Controls.Add(cmbFilter);
+            filterPanel.Controls.Add(lblUser);
+            filterPanel.Controls.Add(cmbUser);
+            filterPanel.Controls.Add(lblFrom);
+            filterPanel.Controls.Add(dtFrom);
+            filterPanel.Controls.Add(lblTo);
+            filterPanel.Controls.Add(dtTo);
+            filterPanel.Controls.Add(btnSearch);
 
-            lblTodaySale = new Label();
-            lblTodaySale.Text = "Today's Sale : ₹0";
-            lblTodaySale.Font = new Font("Segoe UI", 16, FontStyle.Bold);
-            lblTodaySale.Location = new Point(20, 20);
-            lblTodaySale.AutoSize = true;
+            topLayout.Controls.Add(summaryRow, 0, 0);
+            topLayout.Controls.Add(filterPanel, 1, 0);
+            topPanel.Controls.Add(topLayout);
 
-            lblTodayOrders = new Label();
-            lblTodayOrders.Text = "Today's Orders : 0";
-            lblTodayOrders.Font = new Font("Segoe UI", 16, FontStyle.Bold);
-            lblTodayOrders.Location = new Point(350, 20);
-            lblTodayOrders.AutoSize = true;
-
-            topPanel.Controls.Add(lblTodaySale);
-            topPanel.Controls.Add(lblTodayOrders);
-
-            // Orders Grid
-            dgvOrders = new DataGridView();
-            dgvOrders.Dock = DockStyle.Fill;
-            dgvOrders.AllowUserToAddRows = false;
-            dgvOrders.ReadOnly = true;
-            dgvOrders.RowHeadersVisible = false;
-            dgvOrders.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-            dgvOrders.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-
+            // ----- Orders grid card -----
+            Panel ordersCard = CreateCard();
+            ordersCard.Padding = new Padding(1);
+            dgvOrders = CreateGrid();
             dgvOrders.Columns.Add("OrderId", "Order ID");
             dgvOrders.Columns.Add("Date", "Date");
             dgvOrders.Columns.Add("Customer", "Customer");
@@ -133,18 +205,16 @@ namespace BubbyPlanetShowroom
             dgvOrders.Columns.Add("Payment", "Payment");
             dgvOrders.Columns.Add("User", "User");
             dgvOrders.Columns.Add("Amount", "Amount");
-
             dgvOrders.SelectionChanged += DgvOrders_SelectionChanged;
+            Panel ordersHeaderBar = CreateSectionHeader("ORDERS", "Select a row to load item breakdown");
+            ordersCard.Controls.Add(dgvOrders);
+            ordersCard.Controls.Add(ordersHeaderBar);
 
-            // Details Grid
-            dgvDetails = new DataGridView();
-            dgvDetails.Dock = DockStyle.Fill;
-            dgvDetails.AllowUserToAddRows = false;
-            dgvDetails.ReadOnly = true;
-            dgvDetails.RowHeadersVisible = false;
-            dgvDetails.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-            dgvDetails.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-
+            // ----- Details grid card -----
+            Panel detailsCard = CreateCard();
+            detailsCard.Margin = new Padding(0);
+            detailsCard.Padding = new Padding(1);
+            dgvDetails = CreateGrid();
             dgvDetails.Columns.Add("Item", "Item");
             dgvDetails.Columns.Add("Size", "Size");
             dgvDetails.Columns.Add("Qty", "Sold Qty");
@@ -157,10 +227,141 @@ namespace BubbyPlanetShowroom
             dgvDetails.Columns.Add("Taxable", "Taxable");
             dgvDetails.Columns.Add("GST", "GST");
             dgvDetails.Columns.Add("Total", "Total");
+            Panel detailsHeaderBar = CreateSectionHeader("ORDER DETAILS", "Line items for the selected order");
+            dgvDetails.Dock = DockStyle.Fill;
+            detailsCard.Controls.Add(dgvDetails);
+            detailsCard.Controls.Add(detailsHeaderBar);
 
-            main.Controls.Add(topPanel, 0, 0);
-            main.Controls.Add(dgvOrders, 0, 1);
-            main.Controls.Add(dgvDetails, 0, 2);
+            main.Controls.Add(header, 0, 0);
+            main.Controls.Add(topPanel, 0, 1);
+            main.Controls.Add(ordersCard, 0, 2);
+            main.Controls.Add(detailsCard, 0, 3);
+        }
+
+        private static Panel CreateCard()
+        {
+            return new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.White,
+                Margin = new Padding(0, 0, 0, 10),
+                Padding = new Padding(0)
+            };
+        }
+
+        private static Panel CreateSectionHeader(string title, string hint)
+        {
+            Panel bar = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 34,
+                BackColor = HeaderBg,
+                Padding = new Padding(12, 0, 12, 0)
+            };
+            Label lblTitle = new Label
+            {
+                Text = title,
+                Dock = DockStyle.Left,
+                Width = 140,
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                ForeColor = Color.White,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            Label lblHint = new Label
+            {
+                Text = hint,
+                Dock = DockStyle.Fill,
+                Font = new Font("Segoe UI", 8.5f),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                TextAlign = ContentAlignment.MiddleRight
+            };
+            bar.Controls.Add(lblHint);
+            bar.Controls.Add(lblTitle);
+            return bar;
+        }
+
+        private static Panel CreateStatCard(string caption, Label valueLabel, Color bg, Color accent)
+        {
+            Panel card = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = bg,
+                Margin = new Padding(0, 0, 8, 0),
+                Padding = new Padding(12, 10, 12, 10)
+            };
+            card.Paint += (_, e) =>
+            {
+                using SolidBrush bar = new SolidBrush(accent);
+                e.Graphics.FillRectangle(bar, 0, 0, 4, card.Height);
+            };
+
+            Label lblCap = new Label
+            {
+                Text = caption,
+                Dock = DockStyle.Top,
+                Height = 18,
+                Font = new Font("Segoe UI", 8f, FontStyle.Bold),
+                ForeColor = Muted,
+                BackColor = Color.Transparent
+            };
+
+            valueLabel.Dock = DockStyle.Fill;
+            valueLabel.Font = new Font("Segoe UI", 14f, FontStyle.Bold);
+            valueLabel.ForeColor = Slate;
+            valueLabel.TextAlign = ContentAlignment.MiddleLeft;
+            valueLabel.BackColor = Color.Transparent;
+
+            card.Controls.Add(valueLabel);
+            card.Controls.Add(lblCap);
+            return card;
+        }
+
+        private static Label MakeTinyLabel(string text, int x, int y)
+        {
+            return new Label
+            {
+                Text = text,
+                Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
+                ForeColor = Muted,
+                AutoSize = true,
+                Location = new Point(x, y),
+                BackColor = Color.Transparent
+            };
+        }
+
+        private static DataGridView CreateGrid()
+        {
+            DataGridView grid = new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                AllowUserToAddRows = false,
+                AllowUserToResizeRows = false,
+                ReadOnly = true,
+                RowHeadersVisible = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                MultiSelect = false,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                BackgroundColor = Color.White,
+                BorderStyle = BorderStyle.None,
+                CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
+                GridColor = Color.FromArgb(226, 232, 240),
+                RowTemplate = { Height = 32 },
+                ColumnHeadersHeight = 36,
+                ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
+                EnableHeadersVisualStyles = false
+            };
+
+            grid.ColumnHeadersDefaultCellStyle.BackColor = HeaderBg;
+            grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
+            grid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
+            grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleLeft;
+            grid.ColumnHeadersDefaultCellStyle.Padding = new Padding(6, 0, 0, 0);
+            grid.DefaultCellStyle.Font = new Font("Segoe UI", 9f);
+            grid.DefaultCellStyle.Padding = new Padding(6, 0, 6, 0);
+            grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(219, 234, 254);
+            grid.DefaultCellStyle.SelectionForeColor = Color.Black;
+            grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 250, 252);
+            return grid;
         }
 
         private void LoadSummary()

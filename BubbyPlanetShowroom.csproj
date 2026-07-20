@@ -15,4 +15,10 @@
     <PackageReference Include="ZXing.Net.Bindings.Windows.Compatibility" Version="0.16.14" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="BubbyPlanetShowroom.Tests\**" />
+    <EmbeddedResource Remove="BubbyPlanetShowroom.Tests\**" />
+    <None Remove="BubbyPlanetShowroom.Tests\**" />
+  </ItemGroup>
+
 </Project>
