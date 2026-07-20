@@ -76,7 +76,7 @@ namespace BubbyPlanetShowroom
     public class Receipt : UserControl
     {
         private PrintDocument printDocument = new PrintDocument();
-        private const string StoreName = "BubbyPlanet";
+        private const string StoreName = "Bubbyplanet";
         private const string StoreAddressLine1 = "Daudnagar Branch, Aurangabad";
         private const string StoreAddressLine2 = "Bihar - 824143";
         private const string StorePhone = "7870828400";
