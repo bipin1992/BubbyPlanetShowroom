@@ -649,7 +649,7 @@ namespace BubbyPlanetShowroom
         {
             try
             {
-                DBBackup.CreateBackup();
+                BackupProgressForm.RunBackupWithUi(this);
             }
             catch (Exception ex)
             {
