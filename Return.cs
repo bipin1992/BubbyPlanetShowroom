@@ -1049,10 +1049,14 @@ namespace BubbyPlanetShowroom
                         cmd3.Parameters.AddWithValue("@id", orderId);
                         cmd3.ExecuteNonQuery();
 
+                        // Partial or full return must NOT change reward_last_order_id.
+
                         transaction.Commit();
                         pendingTotalRefund = totalRefund;
                         returnCompleted = true;
-                        MessageBox.Show("Return Completed Successfully\n\nTotal Refund Amount: ₹ " + totalRefund.ToString("0.00"));
+                        MessageBox.Show(
+                            "Return Completed Successfully\n\n" +
+                            "Total Refund Amount: ₹ " + totalRefund.ToString("0.00"));
                     }
                     catch
                     {
@@ -1286,5 +1290,6 @@ namespace BubbyPlanetShowroom
                 return IsReturnAllowedWithin7Days(orderDate);
             }
         }
+
     }
 }
