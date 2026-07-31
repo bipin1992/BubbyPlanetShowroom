@@ -87,10 +87,14 @@ namespace BubbyPlanetShowroom
             header.Padding = new Padding(0);
             header.Paint += (_, e) =>
             {
+                Rectangle bounds = header.ClientRectangle;
+                if (bounds.Width <= 0 || bounds.Height <= 0)
+                    return;
+
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 using LinearGradientBrush brush = new LinearGradientBrush(
-                    header.ClientRectangle, Teal, Sky, LinearGradientMode.Horizontal);
-                e.Graphics.FillRectangle(brush, header.ClientRectangle);
+                    bounds, Teal, Sky, LinearGradientMode.Horizontal);
+                e.Graphics.FillRectangle(brush, bounds);
 
                 using Font titleFont = new Font("Segoe UI", 15f, FontStyle.Bold);
                 TextRenderer.DrawText(e.Graphics, "Profile", titleFont,
@@ -189,6 +193,8 @@ namespace BubbyPlanetShowroom
             };
             panel.Paint += (_, e) =>
             {
+                if (panel.Width <= 0 || panel.Height <= 0)
+                    return;
                 using Pen pen = new Pen(FieldBorder);
                 e.Graphics.DrawRectangle(pen, 0, 0, panel.Width - 1, panel.Height - 1);
             };
@@ -209,6 +215,8 @@ namespace BubbyPlanetShowroom
             picPhoto.SizeMode = PictureBoxSizeMode.Zoom;
             picPhoto.Paint += (_, e) =>
             {
+                if (picPhoto.Width <= 0 || picPhoto.Height <= 0)
+                    return;
                 using Pen pen = new Pen(FieldBorder);
                 e.Graphics.DrawRectangle(pen, 0, 0, picPhoto.Width - 1, picPhoto.Height - 1);
             };
@@ -397,6 +405,8 @@ namespace BubbyPlanetShowroom
             };
             card.Paint += (_, e) =>
             {
+                if (card.Height <= 0)
+                    return;
                 using SolidBrush bar = new SolidBrush(accent);
                 e.Graphics.FillRectangle(bar, 0, 0, 4, card.Height);
             };
