@@ -163,11 +163,17 @@ namespace BubbyPlanetShowroom
 
         void LabelPanel_Paint(object sender, PaintEventArgs e)
         {
-            DrawLabel(e.Graphics, labelPanel.ClientRectangle);
+            Rectangle bounds = labelPanel.ClientRectangle;
+            if (bounds.Width <= 0 || bounds.Height <= 0)
+                return;
+            DrawLabel(e.Graphics, bounds);
         }
 
         void DrawLabel(Graphics g, Rectangle bounds)
         {
+            if (bounds.Width <= 0 || bounds.Height <= 0)
+                return;
+
             g.Clear(Color.White);
 
             int pageWidth = bounds.Width;

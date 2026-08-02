@@ -205,15 +205,19 @@ namespace BubbyPlanetShowroom
             };
             accentStrip.Paint += (_, e) =>
             {
+                Rectangle area = accentStrip.ClientRectangle;
+                if (area.Width <= 0 || area.Height <= 0)
+                    return;
+
                 using LinearGradientBrush line = new LinearGradientBrush(
-                    accentStrip.ClientRectangle, Teal, Coral, LinearGradientMode.Horizontal);
+                    area, Teal, Coral, LinearGradientMode.Horizontal);
                 ColorBlend blend = new ColorBlend
                 {
                     Colors = new[] { Teal, Sky, Coral },
                     Positions = new[] { 0f, 0.5f, 1f }
                 };
                 line.InterpolationColors = blend;
-                e.Graphics.FillRectangle(line, accentStrip.ClientRectangle);
+                e.Graphics.FillRectangle(line, area);
             };
 
             Panel cardBody = new Panel
@@ -340,6 +344,8 @@ namespace BubbyPlanetShowroom
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             Rectangle r = brandPanel.ClientRectangle;
+            if (r.Width <= 0 || r.Height <= 0)
+                return;
 
             using (LinearGradientBrush brush = new LinearGradientBrush(
                 r,
@@ -397,11 +403,16 @@ namespace BubbyPlanetShowroom
 
             wrap.Paint += (_, e) =>
             {
+                if (wrap.Width < 4 || wrap.Height < 4)
+                    return;
+
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 bool focused = wrap.ContainsFocus;
                 Color border = focused ? accent : Color.FromArgb(203, 213, 225);
                 using Pen pen = new Pen(border, focused ? 2f : 1f);
                 Rectangle rect = new Rectangle(1, 1, wrap.Width - 3, wrap.Height - 3);
+                if (rect.Width <= 0 || rect.Height <= 0)
+                    return;
                 e.Graphics.DrawRectangle(pen, rect);
                 if (focused)
                 {

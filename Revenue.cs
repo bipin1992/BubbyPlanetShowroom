@@ -669,7 +669,12 @@ WHERE {condition};";
             int right = 24;
             int top = 28;
             int bottom = 54;
-            Rectangle plot = new Rectangle(left, top, area.Width - left - right, area.Height - top - bottom);
+            int plotW = area.Width - left - right;
+            int plotH = area.Height - top - bottom;
+            if (plotW <= 0 || plotH <= 0)
+                return;
+
+            Rectangle plot = new Rectangle(left, top, plotW, plotH);
 
             decimal max = 0;
             foreach (DataRow r in graphData.Rows)
@@ -776,6 +781,9 @@ WHERE {condition};";
             protected override void OnPaint(PaintEventArgs e)
             {
                 base.OnPaint(e);
+                if (Width < 4 || Height < 4)
+                    return;
+
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
                 using (GraphicsPath path = CreatePath(ClientRectangle, Radius))
@@ -783,8 +791,8 @@ WHERE {condition};";
                 {
                     Region = new Region(path);
                     Rectangle borderRect = ClientRectangle;
-                    borderRect.Width -= 1;
-                    borderRect.Height -= 1;
+                    borderRect.Width = Math.Max(1, borderRect.Width - 1);
+                    borderRect.Height = Math.Max(1, borderRect.Height - 1);
                     using (GraphicsPath borderPath = CreatePath(borderRect, Radius))
                     {
                         e.Graphics.DrawPath(pen, borderPath);
@@ -794,8 +802,14 @@ WHERE {condition};";
 
             private static GraphicsPath CreatePath(Rectangle rect, int radius)
             {
-                int diameter = Math.Max(1, radius * 2);
                 GraphicsPath path = new GraphicsPath();
+                if (rect.Width <= 0 || rect.Height <= 0)
+                {
+                    path.AddRectangle(new Rectangle(rect.X, rect.Y, Math.Max(1, rect.Width), Math.Max(1, rect.Height)));
+                    return path;
+                }
+
+                int diameter = Math.Min(Math.Max(1, radius * 2), Math.Min(rect.Width, rect.Height));
                 path.AddArc(rect.Left, rect.Top, diameter, diameter, 180, 90);
                 path.AddArc(rect.Right - diameter, rect.Top, diameter, diameter, 270, 90);
                 path.AddArc(rect.Right - diameter, rect.Bottom - diameter, diameter, diameter, 0, 90);
