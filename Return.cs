@@ -39,13 +39,25 @@ namespace BubbyPlanetShowroom
         Panel infoCard = new Panel();
 
         DataGridView grid = new DataGridView();
+        DataGridView dgvExchange = new DataGridView();
+        TextBox txtExchangeCode = new TextBox();
+        Button btnAddExchange = new Button();
+        Button btnRemoveExchange = new Button();
+        Label lblCalcReturn = new Label();
+        Label lblCalcNew = new Label();
+        Label lblCalcBalance = new Label();
+        Label lblCalcHint = new Label();
 
         PrintDocument printDoc = new PrintDocument();
         private bool isProcessingReturn = false;
         private readonly List<ReturnReceiptLine> pendingPrintLines = new();
+        private readonly List<ReturnReceiptLine> pendingExchangePrintLines = new();
         private decimal pendingTotalRefund = 0;
+        private decimal pendingBalanceDue = 0;
+        private bool pendingIsExchange = false;
         private string currentCustomerName = "";
         private string currentCustomerPhone = "";
+        private DateTime currentOrderDate = DateTime.Now;
 
         private sealed class ReturnReceiptLine
         {
@@ -93,6 +105,8 @@ namespace BubbyPlanetShowroom
             CalculateTotalRefund();
         }
 
+        private bool pendingReturnResumeChecked = false;
+
         public Return()
         {
             InitializeUI();
@@ -127,8 +141,8 @@ namespace BubbyPlanetShowroom
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 10f));  // gap
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 112f)); // summary
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 10f));  // gap
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));  // grid
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 76f));  // footer
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));  // grids
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 130f)); // footer calc + action
             Controls.Add(root);
 
             // ----- Page header -----
@@ -153,7 +167,7 @@ namespace BubbyPlanetShowroom
 
             Label lblTitle = new Label
             {
-                Text = "Sales Return",
+                Text = "Return / Exchange",
                 Font = new Font("Segoe UI Semibold", 15f, FontStyle.Bold),
                 ForeColor = Slate,
                 AutoSize = false,
@@ -162,7 +176,7 @@ namespace BubbyPlanetShowroom
                 TextAlign = ContentAlignment.MiddleLeft
             };
 
-            lblHint.Text = "Search an order · enter return qty · process refund  ·  Allowed within 7 days";
+            lblHint.Text = "Return + optional exchange on same bill  ·  New items ≥ return value  ·  7 days";
             lblHint.Font = hintFont;
             lblHint.ForeColor = MutedText;
             lblHint.AutoSize = false;
@@ -317,33 +331,90 @@ namespace BubbyPlanetShowroom
             gridCard.Controls.Add(grid);
             gridCard.Controls.Add(itemsHeader);
 
+            Panel midPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = PageBg,
+                Margin = new Padding(0),
+                Padding = new Padding(0)
+            };
+            TableLayoutPanel midLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 3,
+                BackColor = PageBg,
+                Margin = new Padding(0),
+                Padding = new Padding(0)
+            };
+            midLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 52f));
+            midLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 8f));
+            midLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 48f));
+            midLayout.Controls.Add(gridCard, 0, 0);
+            midLayout.Controls.Add(new Panel { Dock = DockStyle.Fill, BackColor = PageBg }, 0, 1);
+            midLayout.Controls.Add(BuildExchangeCard(), 0, 2);
+            midPanel.Controls.Add(midLayout);
+
             // ----- Footer action bar -----
             Panel bottomPanel = CreateCard(0);
             bottomPanel.Margin = new Padding(0);
-            bottomPanel.Padding = new Padding(16, 14, 16, 14);
+            bottomPanel.Padding = new Padding(12, 10, 12, 10);
 
-            lblRefund.Text = "Total Refund  ₹ 0.00";
-            lblRefund.Font = new Font("Segoe UI Semibold", 13f, FontStyle.Bold);
-            lblRefund.ForeColor = Color.White;
-            lblRefund.BackColor = Slate;
-            lblRefund.AutoSize = false;
-            lblRefund.Width = 280;
-            lblRefund.Height = 44;
-            lblRefund.Left = 16;
-            lblRefund.Top = 14;
-            lblRefund.TextAlign = ContentAlignment.MiddleLeft;
-            lblRefund.Padding = new Padding(14, 0, 0, 0);
+            Panel calcPanel = new Panel
+            {
+                Left = 12,
+                Top = 8,
+                Width = 520,
+                Height = 110,
+                BackColor = Color.FromArgb(248, 250, 252),
+                Padding = new Padding(10)
+            };
+            calcPanel.Paint += (_, e) =>
+            {
+                if (calcPanel.Width <= 0 || calcPanel.Height <= 0) return;
+                using Pen p = new Pen(CardBorder);
+                e.Graphics.DrawRectangle(p, 0, 0, calcPanel.Width - 1, calcPanel.Height - 1);
+            };
 
-            StyleButton(btnProcess, "Process Return", DisabledButtonColor, 180, 44);
+            lblCalcReturn.Text = "Return value: ₹ 0.00";
+            lblCalcReturn.Font = new Font("Segoe UI Semibold", 10f, FontStyle.Bold);
+            lblCalcReturn.ForeColor = Slate;
+            lblCalcReturn.Location = new Point(10, 8);
+            lblCalcReturn.AutoSize = true;
+
+            lblCalcNew.Text = "New items: ₹ 0.00";
+            lblCalcNew.Font = new Font("Segoe UI Semibold", 10f, FontStyle.Bold);
+            lblCalcNew.ForeColor = PrimaryBlue;
+            lblCalcNew.Location = new Point(10, 34);
+            lblCalcNew.AutoSize = true;
+
+            lblCalcBalance.Text = "Balance due: ₹ 0.00";
+            lblCalcBalance.Font = new Font("Segoe UI Semibold", 12f, FontStyle.Bold);
+            lblCalcBalance.ForeColor = SuccessGreen;
+            lblCalcBalance.Location = new Point(10, 60);
+            lblCalcBalance.AutoSize = true;
+
+            lblCalcHint.Text = "Pure return = refund  ·  Exchange = same bill, pay only extra";
+            lblCalcHint.Font = new Font("Segoe UI", 8f);
+            lblCalcHint.ForeColor = MutedText;
+            lblCalcHint.Location = new Point(240, 12);
+            lblCalcHint.Size = new Size(260, 80);
+
+            calcPanel.Controls.Add(lblCalcReturn);
+            calcPanel.Controls.Add(lblCalcNew);
+            calcPanel.Controls.Add(lblCalcBalance);
+            calcPanel.Controls.Add(lblCalcHint);
+
+            StyleButton(btnProcess, "Process", DisabledButtonColor, 180, 44);
             btnProcess.Enabled = false;
             btnProcess.Click += BtnProcess_Click;
             bottomPanel.Resize += (s, e) =>
             {
                 btnProcess.Left = Math.Max(16, bottomPanel.ClientSize.Width - btnProcess.Width - 16);
-                btnProcess.Top = 14;
+                btnProcess.Top = 40;
             };
 
-            bottomPanel.Controls.Add(lblRefund);
+            bottomPanel.Controls.Add(calcPanel);
             bottomPanel.Controls.Add(btnProcess);
 
             Panel Gap() => new Panel { Dock = DockStyle.Fill, BackColor = PageBg, Margin = new Padding(0) };
@@ -354,18 +425,141 @@ namespace BubbyPlanetShowroom
             root.Controls.Add(Gap(), 0, 3);
             root.Controls.Add(infoCard, 0, 4);
             root.Controls.Add(Gap(), 0, 5);
-            root.Controls.Add(gridCard, 0, 6);
+            root.Controls.Add(midPanel, 0, 6);
             root.Controls.Add(bottomPanel, 0, 7);
 
             txtOrderId.TextChanged += TxtOrderId_TextChanged;
             Load += (s, e) =>
             {
                 btnProcess.Left = Math.Max(16, bottomPanel.ClientSize.Width - btnProcess.Width - 16);
-                btnProcess.Top = 14;
+                btnProcess.Top = 40;
+                BeginInvoke(new Action(TryResumePendingReturnOnStartup));
                 txtOrderId.Focus();
             };
             txtOrderId.KeyDown += txtOrderId_KeyDown;
             txtOrderId.KeyPress += TxtOrderId_KeyPress;
+        }
+
+        private Panel BuildExchangeCard()
+        {
+            Panel card = CreateCard(0);
+            card.Margin = new Padding(0);
+            card.Padding = new Padding(1);
+
+            Panel header = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 36,
+                BackColor = Color.FromArgb(13, 148, 136),
+                Padding = new Padding(12, 0, 12, 0)
+            };
+            Label title = new Label
+            {
+                Text = "EXCHANGE ITEMS (same bill)",
+                Dock = DockStyle.Left,
+                Width = 240,
+                Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
+                ForeColor = Color.White,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            Label hint = new Label
+            {
+                Text = "Add replacement items · value must be ≥ return",
+                Dock = DockStyle.Fill,
+                Font = new Font("Segoe UI", 8.5f),
+                ForeColor = Color.FromArgb(204, 251, 241),
+                TextAlign = ContentAlignment.MiddleRight
+            };
+            header.Controls.Add(hint);
+            header.Controls.Add(title);
+
+            Panel addBar = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 44,
+                BackColor = Color.White,
+                Padding = new Padding(10, 6, 10, 6)
+            };
+            txtExchangeCode.PlaceholderText = "Item code / barcode";
+            txtExchangeCode.Font = new Font("Segoe UI", 10f);
+            txtExchangeCode.BorderStyle = BorderStyle.FixedSingle;
+            txtExchangeCode.Width = 220;
+            txtExchangeCode.Height = 30;
+            txtExchangeCode.Left = 8;
+            txtExchangeCode.Top = 6;
+            txtExchangeCode.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Enter)
+                {
+                    e.SuppressKeyPress = true;
+                    TryAddExchangeItem();
+                }
+            };
+
+            StyleButton(btnAddExchange, "Add Item", SuccessGreen, 100, 30);
+            btnAddExchange.Left = 238;
+            btnAddExchange.Top = 6;
+            btnAddExchange.Click += (_, _) => TryAddExchangeItem();
+
+            StyleButton(btnRemoveExchange, "Remove", Color.FromArgb(220, 38, 38), 100, 30);
+            btnRemoveExchange.Left = 348;
+            btnRemoveExchange.Top = 6;
+            btnRemoveExchange.Click += (_, _) => RemoveSelectedExchangeItem();
+
+            addBar.Controls.Add(txtExchangeCode);
+            addBar.Controls.Add(btnAddExchange);
+            addBar.Controls.Add(btnRemoveExchange);
+
+            dgvExchange.Dock = DockStyle.Fill;
+            dgvExchange.BackgroundColor = Color.White;
+            dgvExchange.BorderStyle = BorderStyle.None;
+            dgvExchange.AllowUserToAddRows = false;
+            dgvExchange.AllowUserToResizeRows = false;
+            dgvExchange.RowHeadersVisible = false;
+            dgvExchange.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            dgvExchange.MultiSelect = false;
+            dgvExchange.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            dgvExchange.RowTemplate.Height = 30;
+            dgvExchange.ColumnHeadersHeight = 32;
+            dgvExchange.EnableHeadersVisualStyles = false;
+            dgvExchange.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(30, 41, 59);
+            dgvExchange.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
+            dgvExchange.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
+            dgvExchange.DefaultCellStyle.Font = new Font("Segoe UI", 9.5f);
+            dgvExchange.DefaultCellStyle.ForeColor = Color.Black;
+            dgvExchange.DefaultCellStyle.BackColor = Color.White;
+            dgvExchange.DefaultCellStyle.SelectionBackColor = Color.FromArgb(167, 243, 208);
+            dgvExchange.DefaultCellStyle.SelectionForeColor = Color.Black;
+            dgvExchange.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 250, 252);
+            dgvExchange.AlternatingRowsDefaultCellStyle.ForeColor = Color.Black;
+            dgvExchange.AlternatingRowsDefaultCellStyle.SelectionBackColor = Color.FromArgb(167, 243, 208);
+            dgvExchange.AlternatingRowsDefaultCellStyle.SelectionForeColor = Color.Black;
+            dgvExchange.Columns.Add("ItemName", "Item");
+            dgvExchange.Columns.Add("ItemCode", "Code");
+            dgvExchange.Columns.Add("Price", "Price");
+            dgvExchange.Columns.Add("Qty", "Qty");
+            dgvExchange.Columns.Add("GstPercent", "GST%");
+            dgvExchange.Columns.Add("Net", "Net");
+            dgvExchange.Columns.Add("ItemId", "ItemId");
+            dgvExchange.Columns.Add("Taxable", "Taxable");
+            dgvExchange.Columns.Add("GstAmt", "GstAmt");
+            dgvExchange.Columns.Add("Gross", "Gross");
+            dgvExchange.Columns["ItemId"].Visible = false;
+            dgvExchange.Columns["Taxable"].Visible = false;
+            dgvExchange.Columns["GstAmt"].Visible = false;
+            dgvExchange.Columns["Gross"].Visible = false;
+            dgvExchange.Columns["Qty"].ReadOnly = false;
+            dgvExchange.Columns["ItemName"].ReadOnly = true;
+            dgvExchange.Columns["ItemCode"].ReadOnly = true;
+            dgvExchange.Columns["Price"].ReadOnly = true;
+            dgvExchange.Columns["GstPercent"].ReadOnly = true;
+            dgvExchange.Columns["Net"].ReadOnly = true;
+            dgvExchange.CellEndEdit += DgvExchange_CellEndEdit;
+
+            card.Controls.Add(dgvExchange);
+            card.Controls.Add(addBar);
+            card.Controls.Add(header);
+            return card;
         }
 
         private static Panel CreateCard(int height)
@@ -473,6 +667,7 @@ namespace BubbyPlanetShowroom
                     if (dr.Read())
                     {
                         DateTime orderDate = Convert.ToDateTime(dr["date_added"]);
+                        currentOrderDate = orderDate;
                         currentCustomerName = (dr["first_name"] + " " + dr["sur_name"]).Trim();
                         currentCustomerPhone = dr["phone"]?.ToString()?.Trim() ?? "";
 
@@ -563,6 +758,8 @@ namespace BubbyPlanetShowroom
                 SetProcessEnabled(grid.Rows.Count > 0);
                 btnReset.Enabled = true;
                 btnReset.BackColor = ResetEnabledColor;
+                ClearExchangeItems();
+                RefreshExchangeCalculation();
             }
         }
 
@@ -574,8 +771,218 @@ namespace BubbyPlanetShowroom
 
         private void SetRefundDisplay(decimal amount)
         {
+            // Kept for compatibility; live calc panel is the primary display.
             lblRefund.Text = "Total Refund  ₹ " + amount.ToString("0.00");
-            lblRefund.BackColor = amount > 0 ? SuccessGreen : Slate;
+            RefreshExchangeCalculation();
+        }
+
+        private decimal GetCurrentReturnValue()
+        {
+            decimal total = 0;
+            if (!grid.Columns.Contains("Refund"))
+                return 0;
+
+            foreach (DataGridViewRow row in grid.Rows)
+            {
+                if (row.IsNewRow) continue;
+                if (decimal.TryParse(row.Cells["Refund"].Value?.ToString(), out decimal val))
+                    total += val;
+            }
+            return Round2(total);
+        }
+
+        private decimal GetCurrentExchangeValue()
+        {
+            decimal total = 0;
+            foreach (DataGridViewRow row in dgvExchange.Rows)
+            {
+                if (row.IsNewRow) continue;
+                if (decimal.TryParse(row.Cells["Net"].Value?.ToString(), out decimal val))
+                    total += val;
+            }
+            return Round2(total);
+        }
+
+        private bool HasExchangeItems() => dgvExchange.Rows.Count > 0;
+
+        private void RefreshExchangeCalculation()
+        {
+            decimal returnValue = GetCurrentReturnValue();
+            decimal newValue = GetCurrentExchangeValue();
+            ExchangeSummary summary = ReturnCalculations.CalculateExchange(returnValue, newValue);
+
+            lblCalcReturn.Text = "Return value: ₹ " + summary.ReturnValue.ToString("0.00");
+            lblCalcNew.Text = "New items: ₹ " + summary.NewItemsValue.ToString("0.00");
+
+            if (summary.NewItemsValue <= 0)
+            {
+                lblCalcBalance.Text = "Refund to customer: ₹ " + summary.ReturnValue.ToString("0.00");
+                lblCalcBalance.ForeColor = summary.ReturnValue > 0 ? SuccessGreen : Slate;
+                lblCalcHint.Text = "Pure return mode — cash refund.\nAdd exchange items to keep same bill.";
+                btnProcess.Text = "Process Return";
+            }
+            else if (summary.Shortfall > 0)
+            {
+                lblCalcBalance.Text = "Short by: ₹ " + summary.Shortfall.ToString("0.00");
+                lblCalcBalance.ForeColor = Color.FromArgb(220, 38, 38);
+                lblCalcHint.Text = "Mall rule: new items must be ≥ return value.\nAdd more / higher value items.";
+                btnProcess.Text = "Process Exchange";
+            }
+            else
+            {
+                lblCalcBalance.Text = "Balance due (collect): ₹ " + summary.BalanceDue.ToString("0.00");
+                lblCalcBalance.ForeColor = PrimaryBlue;
+                lblCalcHint.Text = summary.BalanceDue == 0
+                    ? "Even exchange — no cash.\nSame bill will be updated + printed."
+                    : "Customer pays only the extra amount.\nSame bill updated — no new invoice.";
+                btnProcess.Text = "Process Exchange";
+            }
+        }
+
+        private void TryAddExchangeItem()
+        {
+            if (grid.Rows.Count == 0)
+            {
+                MessageBox.Show("Pehle order search karein.");
+                return;
+            }
+
+            string code = txtExchangeCode.Text.Trim();
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                MessageBox.Show("Item code enter karein.");
+                return;
+            }
+
+            try
+            {
+                using MySqlConnection con = DB.GetConnection();
+                con.Open();
+                using MySqlCommand cmd = new MySqlCommand(@"
+                    SELECT
+                        i.id,
+                        i.item_code,
+                        i.item_name,
+                        i.selling_price,
+                        IFNULL(i.GST, 0) AS GST,
+                        IFNULL(s.quantity, 0) AS stock_qty
+                    FROM inv_items_master i
+                    LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
+                    WHERE LOWER(TRIM(i.item_code)) = LOWER(TRIM(@code))
+                    LIMIT 1", con);
+                cmd.Parameters.AddWithValue("@code", code);
+
+                using MySqlDataReader reader = cmd.ExecuteReader();
+                if (!reader.Read())
+                {
+                    MessageBox.Show("Item not found.");
+                    return;
+                }
+
+                int itemId = Convert.ToInt32(reader["id"]);
+                string itemCode = reader["item_code"]?.ToString() ?? code;
+                string itemName = reader["item_name"]?.ToString() ?? "";
+                decimal price = Convert.ToDecimal(reader["selling_price"]);
+                decimal gstPercent = Convert.ToDecimal(reader["GST"]);
+                int stockQty = Convert.ToInt32(reader["stock_qty"]);
+
+                if (stockQty <= 0)
+                {
+                    MessageBox.Show("Stock not available for this item.");
+                    return;
+                }
+
+                foreach (DataGridViewRow existing in dgvExchange.Rows)
+                {
+                    if (string.Equals(existing.Cells["ItemCode"].Value?.ToString(), itemCode, StringComparison.OrdinalIgnoreCase))
+                    {
+                        int qty = Convert.ToInt32(existing.Cells["Qty"].Value);
+                        if (qty + 1 > stockQty)
+                        {
+                            MessageBox.Show("Stock limit reached.");
+                            return;
+                        }
+                        existing.Cells["Qty"].Value = qty + 1;
+                        RecalcExchangeRow(existing);
+                        RefreshExchangeCalculation();
+                        txtExchangeCode.Clear();
+                        txtExchangeCode.Focus();
+                        return;
+                    }
+                }
+
+                ReturnCalculations.CalculateLineAmounts(price, gstPercent, 0, 1,
+                    out decimal taxable, out decimal gstAmt, out decimal gross, out decimal net);
+
+                dgvExchange.Rows.Add(
+                    itemName,
+                    itemCode,
+                    price.ToString("0.00"),
+                    1,
+                    gstPercent.ToString("0.##"),
+                    net.ToString("0.00"),
+                    itemId,
+                    taxable.ToString("0.00"),
+                    gstAmt.ToString("0.00"),
+                    gross.ToString("0.00"));
+
+                RefreshExchangeCalculation();
+                txtExchangeCode.Clear();
+                txtExchangeCode.Focus();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Could not add item: " + ex.Message);
+            }
+        }
+
+        private void RemoveSelectedExchangeItem()
+        {
+            if (dgvExchange.CurrentRow == null || dgvExchange.CurrentRow.IsNewRow)
+                return;
+            dgvExchange.Rows.Remove(dgvExchange.CurrentRow);
+            RefreshExchangeCalculation();
+        }
+
+        private void DgvExchange_CellEndEdit(object? sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0) return;
+            DataGridViewRow row = dgvExchange.Rows[e.RowIndex];
+            if (dgvExchange.Columns[e.ColumnIndex].Name != "Qty")
+                return;
+
+            if (!int.TryParse(row.Cells["Qty"].Value?.ToString(), out int qty) || qty <= 0)
+            {
+                row.Cells["Qty"].Value = 1;
+                qty = 1;
+            }
+
+            RecalcExchangeRow(row);
+            RefreshExchangeCalculation();
+        }
+
+        private void RecalcExchangeRow(DataGridViewRow row)
+        {
+            decimal.TryParse(row.Cells["Price"].Value?.ToString(), out decimal price);
+            decimal.TryParse(row.Cells["GstPercent"].Value?.ToString(), out decimal gstPercent);
+            int.TryParse(row.Cells["Qty"].Value?.ToString(), out int qty);
+            if (qty <= 0) qty = 1;
+
+            ReturnCalculations.CalculateLineAmounts(price, gstPercent, 0, qty,
+                out decimal taxable, out decimal gstAmt, out decimal gross, out decimal net);
+
+            row.Cells["Qty"].Value = qty;
+            row.Cells["Net"].Value = net.ToString("0.00");
+            row.Cells["Taxable"].Value = taxable.ToString("0.00");
+            row.Cells["GstAmt"].Value = gstAmt.ToString("0.00");
+            row.Cells["Gross"].Value = gross.ToString("0.00");
+        }
+
+        private void ClearExchangeItems()
+        {
+            dgvExchange.Rows.Clear();
+            txtExchangeCode.Clear();
+            RefreshExchangeCalculation();
         }
 
         private void BindOrderItemsGrid(DataTable dt)
@@ -844,6 +1251,18 @@ namespace BubbyPlanetShowroom
             if (isProcessingReturn)
                 return;
 
+            // Already committed earlier (paper out / crash) → reprint only.
+            PendingReturnCheckpoint? existing = PendingReturnStore.Load();
+            if (existing != null &&
+                existing.OrderId > 0 &&
+                (existing.Stage == PendingReturnStage.DbCommitted ||
+                 existing.Stage == PendingReturnStage.PrintStarted) &&
+                IsReturnAlreadyAppliedInDb(existing))
+            {
+                ResumeReprintOnly(existing);
+                return;
+            }
+
             if (!int.TryParse(txtOrderId.Text, out int parsedOrderId))
             {
                 MessageBox.Show("Invalid order id.");
@@ -881,11 +1300,41 @@ namespace BubbyPlanetShowroom
                 return;
             }
 
+            bool isExchange = HasExchangeItems();
+            decimal returnValue = GetCurrentReturnValue();
+            decimal exchangeValue = GetCurrentExchangeValue();
+            ExchangeSummary exchangeSummary = ReturnCalculations.CalculateExchange(returnValue, exchangeValue);
+
+            if (isExchange && !exchangeSummary.MeetsEqualOrMoreRule)
+            {
+                MessageBox.Show(
+                    "Exchange rule: naye items ki value return value se kam nahi ho sakti.\n\n" +
+                    "Return: ₹ " + exchangeSummary.ReturnValue.ToString("0.00") + "\n" +
+                    "New items: ₹ " + exchangeSummary.NewItemsValue.ToString("0.00") + "\n" +
+                    "Short by: ₹ " + exchangeSummary.Shortfall.ToString("0.00"));
+                return;
+            }
+
+            // Resume policy: ONLY after Process Return starts (this point).
+            // Search / qty typing before this — no checkpoint; crash = re-enter return.
+            PendingReturnCheckpoint pending = BuildPendingReturnCheckpoint(
+                PendingReturnStage.ProcessClicked,
+                parsedOrderId,
+                isExchange,
+                returnValue,
+                exchangeValue,
+                0,
+                exchangeSummary.BalanceDue);
+            PendingReturnStore.Save(pending);
+
             isProcessingReturn = true;
             SetProcessEnabled(false);
             bool returnCompleted = false;
             pendingPrintLines.Clear();
+            pendingExchangePrintLines.Clear();
             pendingTotalRefund = 0;
+            pendingBalanceDue = 0;
+            pendingIsExchange = isExchange;
 
             try
             {
@@ -1012,6 +1461,83 @@ namespace BubbyPlanetShowroom
                             });
                         }
 
+                        if (isExchange)
+                        {
+                            foreach (DataGridViewRow exRow in dgvExchange.Rows)
+                            {
+                                if (exRow.IsNewRow) continue;
+
+                                int itemId = Convert.ToInt32(exRow.Cells["ItemId"].Value);
+                                string itemCode = exRow.Cells["ItemCode"].Value?.ToString() ?? "";
+                                string itemName = exRow.Cells["ItemName"].Value?.ToString() ?? "";
+                                int qty = Convert.ToInt32(exRow.Cells["Qty"].Value);
+                                decimal price = Convert.ToDecimal(exRow.Cells["Price"].Value);
+                                decimal gstPercent = Convert.ToDecimal(exRow.Cells["GstPercent"].Value);
+                                decimal gross = Convert.ToDecimal(exRow.Cells["Gross"].Value);
+                                decimal taxable = Convert.ToDecimal(exRow.Cells["Taxable"].Value);
+                                decimal gstAmt = Convert.ToDecimal(exRow.Cells["GstAmt"].Value);
+                                decimal net = Convert.ToDecimal(exRow.Cells["Net"].Value);
+                                decimal discountAmount = Round2(gross - (taxable + gstAmt));
+
+                                using (MySqlCommand stockCheck = new MySqlCommand(@"
+                                    SELECT IFNULL(quantity, 0)
+                                    FROM inv_stock
+                                    WHERE LOWER(TRIM(item_code)) = LOWER(TRIM(@code))
+                                    LIMIT 1
+                                    FOR UPDATE", con, transaction))
+                                {
+                                    stockCheck.Parameters.AddWithValue("@code", itemCode);
+                                    object stockObj = stockCheck.ExecuteScalar();
+                                    int stockQty = stockObj == null || stockObj == DBNull.Value ? 0 : Convert.ToInt32(stockObj);
+                                    if (stockQty < qty)
+                                        throw new Exception($"Insufficient stock for {itemCode}. Available: {stockQty}");
+                                }
+
+                                using MySqlCommand insertCmd = new MySqlCommand(@"
+                                    INSERT INTO inv_order_details
+                                    (
+                                        order_id, item_id, qty, selling_price,
+                                        gross_amount, discount_percent, discount_amount,
+                                        taxable_amount, gst_amount, net_amount
+                                    )
+                                    VALUES
+                                    (
+                                        @oid, @iid, @qty, @price,
+                                        @gross, @discPercent, @discAmt,
+                                        @taxable, @gst, @net
+                                    )", con, transaction);
+                                insertCmd.Parameters.AddWithValue("@oid", orderId);
+                                insertCmd.Parameters.AddWithValue("@iid", itemId);
+                                insertCmd.Parameters.AddWithValue("@qty", qty);
+                                insertCmd.Parameters.AddWithValue("@price", price);
+                                insertCmd.Parameters.AddWithValue("@gross", Round2(gross));
+                                insertCmd.Parameters.AddWithValue("@discPercent", 0);
+                                insertCmd.Parameters.AddWithValue("@discAmt", Round2(discountAmount));
+                                insertCmd.Parameters.AddWithValue("@taxable", Round2(taxable));
+                                insertCmd.Parameters.AddWithValue("@gst", Round2(gstAmt));
+                                insertCmd.Parameters.AddWithValue("@net", Round2(net));
+                                insertCmd.ExecuteNonQuery();
+
+                                using MySqlCommand stockOut = new MySqlCommand(@"
+                                    UPDATE inv_stock
+                                    SET quantity = quantity - @qty,
+                                        last_updated = NOW()
+                                    WHERE LOWER(TRIM(item_code)) = LOWER(TRIM(@code))
+                                      AND quantity >= @qty", con, transaction);
+                                stockOut.Parameters.AddWithValue("@qty", qty);
+                                stockOut.Parameters.AddWithValue("@code", itemCode);
+                                if (stockOut.ExecuteNonQuery() == 0)
+                                    throw new Exception($"Stock update failed for exchange item: {itemCode}");
+
+                                pendingExchangePrintLines.Add(new ReturnReceiptLine
+                                {
+                                    ItemName = itemName,
+                                    Qty = qty,
+                                    Refund = net
+                                });
+                            }
+                        }
+
                         decimal subtotal = 0, taxTotal = 0, grandTotal = 0, totalDiscount = 0;
                         using (MySqlCommand cmd2 = new MySqlCommand(@"
                             SELECT
@@ -1049,14 +1575,49 @@ namespace BubbyPlanetShowroom
                         cmd3.Parameters.AddWithValue("@id", orderId);
                         cmd3.ExecuteNonQuery();
 
-                        // Partial or full return must NOT change reward_last_order_id.
+                        // Return + exchange must NOT change reward_last_order_id.
+
+                        // Persist print payload BEFORE commit (crash-safe resume).
+                        if (isExchange)
+                        {
+                            pendingTotalRefund = 0;
+                            pendingBalanceDue = exchangeSummary.BalanceDue;
+                        }
+                        else
+                        {
+                            pendingTotalRefund = totalRefund;
+                            pendingBalanceDue = 0;
+                        }
+
+                        pending = BuildPendingReturnCheckpoint(
+                            PendingReturnStage.DbCommitted,
+                            orderId,
+                            isExchange,
+                            returnValue,
+                            exchangeValue,
+                            pendingTotalRefund,
+                            pendingBalanceDue);
+                        FillPendingPrintLines(pending);
+                        PendingReturnStore.Save(pending);
 
                         transaction.Commit();
-                        pendingTotalRefund = totalRefund;
                         returnCompleted = true;
-                        MessageBox.Show(
-                            "Return Completed Successfully\n\n" +
-                            "Total Refund Amount: ₹ " + totalRefund.ToString("0.00"));
+
+                        if (isExchange)
+                        {
+                            MessageBox.Show(
+                                "Exchange Completed on Same Bill\n\n" +
+                                "Order ID: " + orderId + "\n" +
+                                "Return value: ₹ " + exchangeSummary.ReturnValue.ToString("0.00") + "\n" +
+                                "New items: ₹ " + exchangeSummary.NewItemsValue.ToString("0.00") + "\n" +
+                                "Collect from customer: ₹ " + exchangeSummary.BalanceDue.ToString("0.00"));
+                        }
+                        else
+                        {
+                            MessageBox.Show(
+                                "Return Completed Successfully\n\n" +
+                                "Total Refund Amount: ₹ " + totalRefund.ToString("0.00"));
+                        }
                     }
                     catch
                     {
@@ -1067,6 +1628,19 @@ namespace BubbyPlanetShowroom
             }
             catch (Exception ex)
             {
+                try
+                {
+                    PendingReturnStore.Save(BuildPendingReturnCheckpoint(
+                        PendingReturnStage.ProcessClicked,
+                        parsedOrderId,
+                        isExchange,
+                        returnValue,
+                        exchangeValue,
+                        0,
+                        exchangeSummary.BalanceDue));
+                }
+                catch { }
+
                 MessageBox.Show("Return failed: " + ex.Message);
                 return;
             }
@@ -1081,22 +1655,31 @@ namespace BubbyPlanetShowroom
 
             try
             {
+                pending = PendingReturnStore.Load() ?? pending;
+                pending.Stage = PendingReturnStage.PrintStarted;
+                PendingReturnStore.Save(pending);
+
                 int dynamicHeight = CalculateReturnPrintHeight();
                 PaperSize customSize = new PaperSize("Custom", 300, dynamicHeight);
                 printDoc.DefaultPageSettings.PaperSize = customSize;
                 PrinterRouting.ApplyReceiptReturnPrinter(printDoc);
                 if (!printDoc.PrinterSettings.IsValid)
                 {
-                    MessageBox.Show("Return saved, but no valid receipt/return printer found.");
+                    MessageBox.Show(
+                        "Return saved, but no valid receipt/return printer found.\n" +
+                        "App dubara khologe to reprint resume ho sakta hai.");
                 }
                 else
                 {
                     printDoc.Print();
+                    PendingReturnStore.Clear();
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Return saved, but receipt print failed: " + ex.Message);
+                MessageBox.Show(
+                    "Return saved, but receipt print failed: " + ex.Message +
+                    "\n\nApp dubara khologe to reprint resume ho sakta hai.");
             }
 
             try
@@ -1106,6 +1689,329 @@ namespace BubbyPlanetShowroom
             catch (Exception ex)
             {
                 MessageBox.Show("Return saved, but order reload failed: " + ex.Message);
+            }
+        }
+
+        private PendingReturnCheckpoint BuildPendingReturnCheckpoint(
+            PendingReturnStage stage,
+            int orderId,
+            bool isExchange,
+            decimal returnValue,
+            decimal exchangeValue,
+            decimal totalRefund,
+            decimal balanceDue)
+        {
+            var checkpoint = new PendingReturnCheckpoint
+            {
+                Stage = stage,
+                OrderId = orderId,
+                StartedAtUtc = DateTime.UtcNow,
+                CustomerName = currentCustomerName ?? "",
+                CustomerPhone = currentCustomerPhone ?? "",
+                OrderDate = currentOrderDate,
+                IsExchange = isExchange,
+                TotalRefund = totalRefund,
+                BalanceDue = balanceDue,
+                ReturnValue = returnValue,
+                ExchangeValue = exchangeValue
+            };
+
+            if (grid.Columns.Contains("id") && grid.Columns.Contains("ReturnQty"))
+            {
+                foreach (DataGridViewRow row in grid.Rows)
+                {
+                    if (row.IsNewRow) continue;
+                    if (!int.TryParse(row.Cells["ReturnQty"].Value?.ToString(), out int returnNow) || returnNow <= 0)
+                        continue;
+
+                    int detailId = Convert.ToInt32(row.Cells["id"].Value);
+                    int returnedAlready = 0;
+                    if (grid.Columns.Contains("return_qty"))
+                        int.TryParse(row.Cells["return_qty"].Value?.ToString(), out returnedAlready);
+
+                    checkpoint.ReturnLines.Add(new PendingReturnLine
+                    {
+                        DetailId = detailId,
+                        ItemName = row.Cells["item_name"].Value?.ToString() ?? "",
+                        ItemCode = grid.Columns.Contains("item_code")
+                            ? (row.Cells["item_code"].Value?.ToString() ?? "")
+                            : "",
+                        ReturnQty = returnNow,
+                        ExpectedReturnQtyAfter = returnedAlready + returnNow
+                    });
+                }
+            }
+
+            foreach (DataGridViewRow exRow in dgvExchange.Rows)
+            {
+                if (exRow.IsNewRow) continue;
+                checkpoint.ExchangeLines.Add(new PendingExchangeLine
+                {
+                    ItemId = Convert.ToInt32(exRow.Cells["ItemId"].Value),
+                    ItemCode = exRow.Cells["ItemCode"].Value?.ToString() ?? "",
+                    ItemName = exRow.Cells["ItemName"].Value?.ToString() ?? "",
+                    Qty = Convert.ToInt32(exRow.Cells["Qty"].Value),
+                    Price = Convert.ToDecimal(exRow.Cells["Price"].Value),
+                    GstPercent = Convert.ToDecimal(exRow.Cells["GstPercent"].Value),
+                    Gross = Convert.ToDecimal(exRow.Cells["Gross"].Value),
+                    Taxable = Convert.ToDecimal(exRow.Cells["Taxable"].Value),
+                    GstAmt = Convert.ToDecimal(exRow.Cells["GstAmt"].Value),
+                    Net = Convert.ToDecimal(exRow.Cells["Net"].Value)
+                });
+            }
+
+            return checkpoint;
+        }
+
+        private void FillPendingPrintLines(PendingReturnCheckpoint checkpoint)
+        {
+            checkpoint.PrintReturnLines.Clear();
+            checkpoint.PrintExchangeLines.Clear();
+
+            foreach (ReturnReceiptLine line in pendingPrintLines)
+            {
+                checkpoint.PrintReturnLines.Add(new PendingReturnPrintLine
+                {
+                    ItemName = line.ItemName,
+                    Qty = line.Qty,
+                    Amount = line.Refund
+                });
+            }
+
+            foreach (ReturnReceiptLine line in pendingExchangePrintLines)
+            {
+                checkpoint.PrintExchangeLines.Add(new PendingReturnPrintLine
+                {
+                    ItemName = line.ItemName,
+                    Qty = line.Qty,
+                    Amount = line.Refund
+                });
+            }
+        }
+
+        private void ApplyPendingPrintLinesToMemory(PendingReturnCheckpoint pending)
+        {
+            pendingPrintLines.Clear();
+            pendingExchangePrintLines.Clear();
+            pendingIsExchange = pending.IsExchange;
+            pendingTotalRefund = pending.TotalRefund;
+            pendingBalanceDue = pending.BalanceDue;
+            currentCustomerName = pending.CustomerName ?? "";
+            currentCustomerPhone = pending.CustomerPhone ?? "";
+            currentOrderDate = pending.OrderDate;
+
+            foreach (PendingReturnPrintLine line in pending.PrintReturnLines)
+            {
+                pendingPrintLines.Add(new ReturnReceiptLine
+                {
+                    ItemName = line.ItemName,
+                    Qty = line.Qty,
+                    Refund = line.Amount
+                });
+            }
+
+            foreach (PendingReturnPrintLine line in pending.PrintExchangeLines)
+            {
+                pendingExchangePrintLines.Add(new ReturnReceiptLine
+                {
+                    ItemName = line.ItemName,
+                    Qty = line.Qty,
+                    Refund = line.Amount
+                });
+            }
+        }
+
+        private bool IsReturnAlreadyAppliedInDb(PendingReturnCheckpoint pending)
+        {
+            if (pending.ReturnLines == null || pending.ReturnLines.Count == 0)
+                return false;
+
+            try
+            {
+                using MySqlConnection con = DB.GetConnection();
+                con.Open();
+                foreach (PendingReturnLine line in pending.ReturnLines)
+                {
+                    using MySqlCommand cmd = new MySqlCommand(
+                        "SELECT IFNULL(return_qty,0) FROM inv_order_details WHERE id=@id",
+                        con);
+                    cmd.Parameters.AddWithValue("@id", line.DetailId);
+                    object? result = cmd.ExecuteScalar();
+                    if (result == null || result == DBNull.Value)
+                        return false;
+                    int actual = Convert.ToInt32(result);
+                    if (actual < line.ExpectedReturnQtyAfter)
+                        return false;
+                }
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void ResumeReprintOnly(PendingReturnCheckpoint pending)
+        {
+            ApplyPendingPrintLinesToMemory(pending);
+            if (pendingPrintLines.Count == 0 && pendingExchangePrintLines.Count == 0)
+            {
+                MessageBox.Show("Pending return print data missing. Clearing resume file.");
+                PendingReturnStore.Clear();
+                return;
+            }
+
+            try
+            {
+                pending.Stage = PendingReturnStage.PrintStarted;
+                PendingReturnStore.Save(pending);
+
+                int dynamicHeight = CalculateReturnPrintHeight();
+                PaperSize customSize = new PaperSize("Custom", 300, dynamicHeight);
+                printDoc.DefaultPageSettings.PaperSize = customSize;
+                PrinterRouting.ApplyReceiptReturnPrinter(printDoc);
+                if (!printDoc.PrinterSettings.IsValid)
+                {
+                    MessageBox.Show(
+                        "Return already saved in DB, but no printer found.\nFix printer and open Return again.");
+                    return;
+                }
+
+                printDoc.Print();
+                PendingReturnStore.Clear();
+                MessageBox.Show(
+                    pending.IsExchange
+                        ? "Exchange reprint done ✅\nOrder ID: " + pending.OrderId
+                        : "Return reprint done ✅\nOrder ID: " + pending.OrderId);
+
+                try { LoadOrder(pending.OrderId); }
+                catch { }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    "Reprint failed: " + ex.Message +
+                    "\nReturn already in DB. Open Return again to retry.");
+            }
+        }
+
+        /// <summary>
+        /// Crash recovery for incomplete Process/Print only.
+        /// Pending file is created only after Process Return starts — not while searching/entering qtys.
+        /// </summary>
+        private void TryResumePendingReturnOnStartup()
+        {
+            if (pendingReturnResumeChecked)
+                return;
+            pendingReturnResumeChecked = true;
+
+            if (!PendingReturnStore.Exists())
+                return;
+
+            PendingReturnCheckpoint? pending = PendingReturnStore.Load();
+            if (pending == null || pending.OrderId <= 0)
+            {
+                if (pending != null)
+                    PendingReturnStore.Clear();
+                return;
+            }
+
+            bool applied = IsReturnAlreadyAppliedInDb(pending);
+            bool hasPrintData =
+                (pending.PrintReturnLines != null && pending.PrintReturnLines.Count > 0) ||
+                (pending.PrintExchangeLines != null && pending.PrintExchangeLines.Count > 0);
+
+            string msg;
+            if (applied && hasPrintData)
+            {
+                msg =
+                    "Incomplete return/exchange print found.\n\n" +
+                    $"Order ID: {pending.OrderId}\n" +
+                    (pending.IsExchange
+                        ? $"Balance due: ₹{pending.BalanceDue:N2}\n"
+                        : $"Refund: ₹{pending.TotalRefund:N2}\n") +
+                    "DB me save ho chuka, print incomplete.\n\n" +
+                    "Reprint now?\n\nYes = reprint  |  No = discard resume";
+            }
+            else if (applied && !hasPrintData)
+            {
+                PendingReturnStore.Clear();
+                MessageBox.Show(
+                    "Return already saved in DB for Order " + pending.OrderId +
+                    ", but print snapshot missing. Resume cleared — search order manually if needed.");
+                return;
+            }
+            else
+            {
+                msg =
+                    "Incomplete return/exchange found (Process clicked, DB save not finished).\n\n" +
+                    $"Order ID: {pending.OrderId}\n" +
+                    $"Return lines: {pending.ReturnLines?.Count ?? 0}\n\n" +
+                    "Continue process & print now?\n\nYes = retry  |  No = discard";
+            }
+
+            DialogResult dr = MessageBox.Show(
+                msg,
+                "Resume Return",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+
+            if (dr != DialogResult.Yes)
+            {
+                PendingReturnStore.Clear();
+                return;
+            }
+
+            if (applied && hasPrintData)
+            {
+                ResumeReprintOnly(pending);
+                return;
+            }
+
+            // Restore UI and retry full process.
+            try
+            {
+                txtOrderId.Text = pending.OrderId.ToString();
+                LoadOrder(pending.OrderId);
+
+                if (grid.Columns.Contains("id") && grid.Columns.Contains("ReturnQty"))
+                {
+                    foreach (PendingReturnLine line in pending.ReturnLines)
+                    {
+                        foreach (DataGridViewRow row in grid.Rows)
+                        {
+                            if (row.IsNewRow) continue;
+                            if (Convert.ToInt32(row.Cells["id"].Value) != line.DetailId)
+                                continue;
+                            row.Cells["ReturnQty"].Value = line.ReturnQty;
+                            break;
+                        }
+                    }
+                    RefreshAllRefundCells();
+                }
+
+                ClearExchangeItems();
+                foreach (PendingExchangeLine ex in pending.ExchangeLines)
+                {
+                    dgvExchange.Rows.Add(
+                        ex.ItemName,
+                        ex.ItemCode,
+                        ex.Price.ToString("0.00"),
+                        ex.Qty,
+                        ex.GstPercent.ToString("0.##"),
+                        ex.Net.ToString("0.00"),
+                        ex.ItemId,
+                        ex.Taxable.ToString("0.00"),
+                        ex.GstAmt.ToString("0.00"),
+                        ex.Gross.ToString("0.00"));
+                }
+                RefreshExchangeCalculation();
+
+                BtnProcess_Click(btnProcess, EventArgs.Empty);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Could not resume return: " + ex.Message);
             }
         }
 
@@ -1139,21 +2045,23 @@ namespace BubbyPlanetShowroom
             y += 15;
 
             // 2) Heading (centered)
-            string heading = "RETURN RECEIPT";
+            string heading = pendingIsExchange ? "EXCHANGE BILL" : "RETURN RECEIPT";
             SizeF headingSize = g.MeasureString(heading, bold);
             g.DrawString(heading, bold, Brushes.Black, (pageWidth - headingSize.Width) / 2, y);
             y += 15;
 
             // 3) Return id
-            g.DrawString("Return ID: " + returnId, font, Brushes.Black, 5, y);
+            g.DrawString((pendingIsExchange ? "Exchange ID: " : "Return ID: ") + returnId, font, Brushes.Black, 5, y);
             y += 13;
 
             // 4) Original invoice id
-            g.DrawString("Original Invoice ID: " + txtOrderId.Text, font, Brushes.Black, 5, y);
+            g.DrawString("Invoice ID: " + txtOrderId.Text, font, Brushes.Black, 5, y);
             y += 13;
 
-            // 5) Date-time
-            g.DrawString("Date: " + DateTime.Now.ToString("dd-MM-yyyy HH:mm"), font, Brushes.Black, 5, y);
+            // 5) Date-time (original bill date + process time)
+            g.DrawString("Bill Date: " + currentOrderDate.ToString("dd-MM-yyyy HH:mm"), font, Brushes.Black, 5, y);
+            y += 13;
+            g.DrawString("Processed: " + DateTime.Now.ToString("dd-MM-yyyy HH:mm"), font, Brushes.Black, 5, y);
             y += 13;
 
             // 6) Customer details
@@ -1170,7 +2078,8 @@ namespace BubbyPlanetShowroom
             g.DrawString("-----------------------------------------------", font, Brushes.Black, 5, y);
             y += 12;
 
-            // Column headers
+            g.DrawString(pendingIsExchange ? "RETURNED ITEMS" : "ITEMS", bold, Brushes.Black, 5, y);
+            y += 14;
             g.DrawString("Item", bold, Brushes.Black, 5, y);
             g.DrawString("Qty", bold, Brushes.Black, 160, y);
             g.DrawString("Amt", bold, Brushes.Black, 220, y);
@@ -1178,22 +2087,20 @@ namespace BubbyPlanetShowroom
 
             g.DrawString("-----------------------------------------------", font, Brushes.Black, 5, y);
             y += 10;
-            decimal totalRefundAmount = pendingTotalRefund;
+            decimal totalReturnAmount = 0;
 
             foreach (ReturnReceiptLine line in pendingPrintLines)
             {
                 string name = line.ItemName;
                 int qty = line.Qty;
                 decimal refund = line.Refund;
+                totalReturnAmount += refund;
 
                 if (name.Length > 18)
                 {
-                    string line1 = name.Substring(0, 18);
-                    string line2 = name.Substring(18);
-
-                    g.DrawString(line1, font, Brushes.Black, 5, y);
+                    g.DrawString(name.Substring(0, 18), font, Brushes.Black, 5, y);
                     y += 12;
-                    g.DrawString(line2, font, Brushes.Black, 5, y);
+                    g.DrawString(name.Substring(18), font, Brushes.Black, 5, y);
                 }
                 else
                 {
@@ -1205,18 +2112,69 @@ namespace BubbyPlanetShowroom
                 y += 18;
             }
 
-            y += 10;
-            g.DrawString("-----------------------------------------------", font, Brushes.Black, 5, y);
-            y += 15;
+            if (pendingIsExchange)
+            {
+                y += 6;
+                g.DrawString("-----------------------------------------------", font, Brushes.Black, 5, y);
+                y += 12;
+                g.DrawString("NEW ITEMS", bold, Brushes.Black, 5, y);
+                y += 14;
+                g.DrawString("Item", bold, Brushes.Black, 5, y);
+                g.DrawString("Qty", bold, Brushes.Black, 160, y);
+                g.DrawString("Amt", bold, Brushes.Black, 220, y);
+                y += 15;
+                g.DrawString("-----------------------------------------------", font, Brushes.Black, 5, y);
+                y += 10;
 
-            g.DrawString("TOTAL REFUND : ₹ " + totalRefundAmount.ToString("0.00"), bold, Brushes.Black, 5, y);
-            y += 20;
+                decimal newTotal = 0;
+                foreach (ReturnReceiptLine line in pendingExchangePrintLines)
+                {
+                    string name = line.ItemName;
+                    int qty = line.Qty;
+                    decimal amt = line.Refund;
+                    newTotal += amt;
+
+                    if (name.Length > 18)
+                    {
+                        g.DrawString(name.Substring(0, 18), font, Brushes.Black, 5, y);
+                        y += 12;
+                        g.DrawString(name.Substring(18), font, Brushes.Black, 5, y);
+                    }
+                    else
+                    {
+                        g.DrawString(name, font, Brushes.Black, 5, y);
+                    }
+
+                    g.DrawString(qty.ToString(), font, Brushes.Black, 160, y);
+                    g.DrawString(amt.ToString("0.00"), font, Brushes.Black, 220, y);
+                    y += 18;
+                }
+
+                y += 8;
+                g.DrawString("-----------------------------------------------", font, Brushes.Black, 5, y);
+                y += 14;
+                g.DrawString("Return value : ₹ " + totalReturnAmount.ToString("0.00"), font, Brushes.Black, 5, y);
+                y += 14;
+                g.DrawString("New items    : ₹ " + newTotal.ToString("0.00"), font, Brushes.Black, 5, y);
+                y += 14;
+                g.DrawString("BALANCE DUE  : ₹ " + pendingBalanceDue.ToString("0.00"), bold, Brushes.Black, 5, y);
+                y += 18;
+            }
+            else
+            {
+                y += 10;
+                g.DrawString("-----------------------------------------------", font, Brushes.Black, 5, y);
+                y += 15;
+                g.DrawString("TOTAL REFUND : ₹ " + pendingTotalRefund.ToString("0.00"), bold, Brushes.Black, 5, y);
+                y += 20;
+            }
 
             g.DrawString("Thank You!", font, Brushes.Black, 90, y);
         }
 
         private void BtnReset_Click(object sender, EventArgs e)
         {
+            PendingReturnStore.Clear();
             txtOrderId.Text = "";
             ResetReturnForm();
             txtOrderId.Focus();
@@ -1231,6 +2189,7 @@ namespace BubbyPlanetShowroom
         {
             currentCustomerName = "";
             currentCustomerPhone = "";
+            currentOrderDate = DateTime.Now;
             lblCustomer.Text = "Customer: —";
             lblPhone.Text = "Phone: —";
             lblDate.Text = "Date: —";
@@ -1243,6 +2202,7 @@ namespace BubbyPlanetShowroom
             grid.Rows.Clear();
             grid.Columns.Clear();
             grid.Enabled = true;
+            ClearExchangeItems();
             SetProcessEnabled(false);
             btnReset.Enabled = false;
             btnReset.BackColor = DisabledButtonColor;
@@ -1250,11 +2210,17 @@ namespace BubbyPlanetShowroom
 
         private int CalculateReturnPrintHeight()
         {
-            int baseHeight = 290;
+            int baseHeight = pendingIsExchange ? 380 : 290;
             int perLineHeight = 18;
             int printableLines = 0;
 
             foreach (ReturnReceiptLine line in pendingPrintLines)
+            {
+                string name = line.ItemName ?? "";
+                printableLines += name.Length > 18 ? 2 : 1;
+            }
+
+            foreach (ReturnReceiptLine line in pendingExchangePrintLines)
             {
                 string name = line.ItemName ?? "";
                 printableLines += name.Length > 18 ? 2 : 1;

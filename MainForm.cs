@@ -651,7 +651,33 @@ namespace BubbyPlanetShowroom
                 userChip.Visible = true;
                 if (btnLogout.Parent is Panel actions)
                     LayoutHeaderActions(actions);
+
+                // Crash recovery: open Receipt/Return so incomplete Process/Print can resume.
+                OpenPendingRecoveryTabIfNeeded();
             }
+        }
+
+        private void OpenPendingRecoveryTabIfNeeded()
+        {
+            bool hasSale = PendingSaleStore.Exists();
+            bool hasReturn = PendingReturnStore.Exists();
+            if (!hasSale && !hasReturn)
+                return;
+
+            string target = "Receipt";
+            if (hasSale && hasReturn)
+            {
+                DateTime saleAt = PendingSaleStore.Load()?.StartedAtUtc ?? DateTime.MinValue;
+                DateTime returnAt = PendingReturnStore.Load()?.StartedAtUtc ?? DateTime.MinValue;
+                target = returnAt > saleAt ? "Return" : "Receipt";
+            }
+            else if (hasReturn)
+            {
+                target = "Return";
+            }
+
+            if (menuButtons.TryGetValue(target, out Button? btn) && btn.Visible)
+                btn.PerformClick();
         }
 
         private void BtnLogout_Click(object sender, EventArgs e)
@@ -693,18 +719,18 @@ namespace BubbyPlanetShowroom
 
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
         {
-            try
-            {
-                BackupProgressForm.RunBackupWithUi(this);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    "Database backup failed.\n\n" + ex.Message,
-                    "Backup Error",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
-            }
+            //try
+            //{
+            //    BackupProgressForm.RunBackupWithUi(this);
+            //}
+            //catch (Exception ex)
+            //{
+            //    MessageBox.Show(
+            //        "Database backup failed.\n\n" + ex.Message,
+            //        "Backup Error",
+            //        MessageBoxButtons.OK,
+            //        MessageBoxIcon.Error);
+            //}
         }
     }
 }
