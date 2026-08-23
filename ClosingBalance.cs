@@ -120,7 +120,7 @@ namespace BubbyPlanetShowroom
 
             AddField(formLayout, "Closing Date", txtClosingDate, 0, 0);
             AddField(formLayout, "Opening Balance Auto", txtOpeningBalance, 1, 0);
-            AddField(formLayout, "Cash Sale From DB", txtCashSales, 2, 0);
+            AddField(formLayout, "Cash From DB (Sales ± Returns)", txtCashSales, 2, 0);
             AddField(formLayout, "Counter Cash", txtCounterCash, 3, 0);
 
             Button btnAddCashIn = CreateButton("Add IN", green, 0, 0, 86);
@@ -1011,21 +1011,45 @@ LIMIT 1;";
             conn.Open();
 
             DB.EnsureColumnExists(conn, "inv_orders", "payment_method", "VARCHAR(40) NOT NULL DEFAULT 'Cash'");
+            DB.EnsureReturnSettlementSchema(conn);
 
-            string query = @"
+            string orderCashQuery = @"
 SELECT IFNULL(SUM(grand_total), 0)
 FROM inv_orders
 WHERE DATE(date_added) = @sale_date
   AND LOWER(TRIM(IFNULL(payment_method, 'Cash'))) = 'cash';";
 
-            using MySqlCommand cmd = new MySqlCommand(query, conn);
-            cmd.Parameters.AddWithValue("@sale_date", date.Date);
-            object result = cmd.ExecuteScalar();
+            using MySqlCommand orderCmd = new MySqlCommand(orderCashQuery, conn);
+            orderCmd.Parameters.AddWithValue("@sale_date", date.Date);
+            object orderResult = orderCmd.ExecuteScalar();
+            decimal orderCash = orderResult == null || orderResult == DBNull.Value
+                ? 0
+                : Convert.ToDecimal(orderResult, CultureInfo.InvariantCulture);
 
-            if (result == null || result == DBNull.Value)
-                return 0;
+            // Exchange collect (Cash) increases counter; return refund (Cash) decreases it.
+            string settlementQuery = @"
+SELECT IFNULL(SUM(
+    CASE
+        WHEN LOWER(TRIM(settlement_type)) = 'collect'
+             AND LOWER(TRIM(payment_method)) = 'cash'
+            THEN amount
+        WHEN LOWER(TRIM(settlement_type)) = 'refund'
+             AND LOWER(TRIM(payment_method)) = 'cash'
+            THEN -amount
+        ELSE 0
+    END
+), 0)
+FROM inv_return_settlements
+WHERE DATE(created_at) = @sale_date";
 
-            return Convert.ToDecimal(result, CultureInfo.InvariantCulture);
+            using MySqlCommand settleCmd = new MySqlCommand(settlementQuery, conn);
+            settleCmd.Parameters.AddWithValue("@sale_date", date.Date);
+            object settleResult = settleCmd.ExecuteScalar();
+            decimal settlementCash = settleResult == null || settleResult == DBNull.Value
+                ? 0
+                : Convert.ToDecimal(settleResult, CultureInfo.InvariantCulture);
+
+            return orderCash + settlementCash;
         }
 
         private decimal ReadAmount(TextBox textBox)

@@ -93,18 +93,24 @@ namespace BubbyPlanetShowroom
             decimal refundGross = Round2(grossAmount / currentRemaining * returnNow);
             decimal refundDiscount = Round2(discountAmount / currentRemaining * returnNow);
             decimal refundTaxable = Round2(taxableAmount / currentRemaining * returnNow);
-            decimal refundGst = Round2(gstAmount / currentRemaining * returnNow);
+
+            decimal newNet = Round2(netAmount - refund);
+            decimal newGross = Round2(grossAmount - refundGross);
+            decimal newDiscount = Round2(discountAmount - refundDiscount);
+            decimal newTaxable = Round2(taxableAmount - refundTaxable);
+            // Keep GST as residual so taxable + gst always equals net (no paisa drift).
+            decimal newGst = Round2(newNet - newTaxable);
 
             return new ReturnLineResult
             {
                 NewReturnQty = newReturnQty,
                 NewRemainingQty = newRemaining,
                 Refund = refund,
-                NewGrossAmount = Round2(grossAmount - refundGross),
-                NewDiscountAmount = Round2(discountAmount - refundDiscount),
-                NewTaxableAmount = Round2(taxableAmount - refundTaxable),
-                NewGstAmount = Round2(gstAmount - refundGst),
-                NewNetAmount = Round2(netAmount - refund)
+                NewGrossAmount = newGross,
+                NewDiscountAmount = newDiscount,
+                NewTaxableAmount = newTaxable,
+                NewGstAmount = newGst,
+                NewNetAmount = newNet
             };
         }
 

@@ -174,5 +174,29 @@ CREATE TABLE IF NOT EXISTS daily_cash_movements
             }
         }
 
+        /// <summary>
+        /// Cash/Online money movement for returns (refund out) and exchanges (balance collect in).
+        /// Used by Closing Balance so counter cash reflects Cash settlements.
+        /// </summary>
+        public static void EnsureReturnSettlementSchema(MySqlConnection conn)
+        {
+            string create = @"
+CREATE TABLE IF NOT EXISTS inv_return_settlements
+(
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    order_id INT NOT NULL,
+    settlement_type VARCHAR(20) NOT NULL,
+    payment_method VARCHAR(40) NOT NULL,
+    amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX ix_return_settlements_order (order_id),
+    INDEX ix_return_settlements_date_method (created_at, payment_method, settlement_type)
+);";
+            using (MySqlCommand cmd = new MySqlCommand(create, conn))
+            {
+                cmd.ExecuteNonQuery();
+            }
+        }
+
     }
 }

@@ -5,6 +5,8 @@ using System.Drawing;
 using System.Drawing.Printing;
 using System.Windows.Forms;
 using MySql.Data.MySqlClient;
+using ZXing;
+using ZXing.Windows.Compatibility;
 
 namespace BubbyPlanetShowroom
 {
@@ -14,6 +16,8 @@ namespace BubbyPlanetShowroom
         private const string StoreAddressLine1 = "Daudnagar Branch, Aurangabad";
         private const string StoreAddressLine2 = "Bihar - 824143";
         private const string StorePhone = "7870828400";
+        private const string StoreEmail = "bubbyplanet@gmail.com";
+        private const string StoreWebsite = "bubbyplanet.com";
         private static readonly Color PageBg = Color.FromArgb(241, 245, 249);
         private static readonly Color Slate = Color.FromArgb(15, 23, 42);
         private static readonly Color PrimaryBlue = Color.FromArgb(37, 99, 235);
@@ -47,6 +51,8 @@ namespace BubbyPlanetShowroom
         Label lblCalcNew = new Label();
         Label lblCalcBalance = new Label();
         Label lblCalcHint = new Label();
+        Label lblPaymentMethod = new Label();
+        ComboBox cmbPaymentMethod = new ComboBox();
 
         PrintDocument printDoc = new PrintDocument();
         private bool isProcessingReturn = false;
@@ -55,6 +61,9 @@ namespace BubbyPlanetShowroom
         private decimal pendingTotalRefund = 0;
         private decimal pendingBalanceDue = 0;
         private bool pendingIsExchange = false;
+        private string pendingPaymentMethod = "Cash";
+        private string pendingSettlementType = "";
+        private decimal pendingSettlementAmount = 0;
         private string currentCustomerName = "";
         private string currentCustomerPhone = "";
         private DateTime currentOrderDate = DateTime.Now;
@@ -62,8 +71,21 @@ namespace BubbyPlanetShowroom
         private sealed class ReturnReceiptLine
         {
             public string ItemName { get; set; } = "";
+            public string ItemCode { get; set; } = "";
+            public string Size { get; set; } = "";
             public int Qty { get; set; }
-            public decimal Refund { get; set; }
+            public decimal Price { get; set; }
+            public decimal DiscountPercent { get; set; }
+            public decimal Gross { get; set; }
+            public decimal Taxable { get; set; }
+            public decimal Gst { get; set; }
+            public decimal Net { get; set; }
+            /// <summary>Alias used by older print/resume paths.</summary>
+            public decimal Refund
+            {
+                get => Net;
+                set => Net = value;
+            }
         }
 
         private decimal Round2(decimal value) => ReturnCalculations.Round2(value);
@@ -364,8 +386,8 @@ namespace BubbyPlanetShowroom
             {
                 Left = 12,
                 Top = 8,
-                Width = 520,
-                Height = 110,
+                Width = 560,
+                Height = 118,
                 BackColor = Color.FromArgb(248, 250, 252),
                 Padding = new Padding(10)
             };
@@ -397,13 +419,30 @@ namespace BubbyPlanetShowroom
             lblCalcHint.Text = "Pure return = refund  ·  Exchange = same bill, pay only extra";
             lblCalcHint.Font = new Font("Segoe UI", 8f);
             lblCalcHint.ForeColor = MutedText;
-            lblCalcHint.Location = new Point(240, 12);
-            lblCalcHint.Size = new Size(260, 80);
+            lblCalcHint.Location = new Point(250, 8);
+            lblCalcHint.Size = new Size(180, 55);
+
+            lblPaymentMethod.Text = "Payment:";
+            lblPaymentMethod.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
+            lblPaymentMethod.ForeColor = Slate;
+            lblPaymentMethod.Location = new Point(250, 68);
+            lblPaymentMethod.AutoSize = true;
+            lblPaymentMethod.Visible = false;
+
+            cmbPaymentMethod.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbPaymentMethod.Items.AddRange(new object[] { "Cash", "Online" });
+            cmbPaymentMethod.SelectedIndex = 0;
+            cmbPaymentMethod.Location = new Point(320, 64);
+            cmbPaymentMethod.Size = new Size(110, 28);
+            cmbPaymentMethod.Font = new Font("Segoe UI", 9.5f);
+            cmbPaymentMethod.Visible = false;
 
             calcPanel.Controls.Add(lblCalcReturn);
             calcPanel.Controls.Add(lblCalcNew);
             calcPanel.Controls.Add(lblCalcBalance);
             calcPanel.Controls.Add(lblCalcHint);
+            calcPanel.Controls.Add(lblPaymentMethod);
+            calcPanel.Controls.Add(cmbPaymentMethod);
 
             StyleButton(btnProcess, "Process", DisabledButtonColor, 180, 44);
             btnProcess.Enabled = false;
@@ -537,6 +576,7 @@ namespace BubbyPlanetShowroom
             dgvExchange.Columns.Add("ItemName", "Item");
             dgvExchange.Columns.Add("ItemCode", "Code");
             dgvExchange.Columns.Add("Price", "Price");
+            dgvExchange.Columns.Add("Discount", "Disc %");
             dgvExchange.Columns.Add("Qty", "Qty");
             dgvExchange.Columns.Add("GstPercent", "GST%");
             dgvExchange.Columns.Add("Net", "Net");
@@ -544,11 +584,18 @@ namespace BubbyPlanetShowroom
             dgvExchange.Columns.Add("Taxable", "Taxable");
             dgvExchange.Columns.Add("GstAmt", "GstAmt");
             dgvExchange.Columns.Add("Gross", "Gross");
+            dgvExchange.Columns.Add("AutoDiscount", "AutoDiscount");
+            dgvExchange.Columns.Add("ManualDiscount", "ManualDiscount");
+            dgvExchange.Columns.Add("DiscountManual", "DiscountManual");
             dgvExchange.Columns["ItemId"].Visible = false;
             dgvExchange.Columns["Taxable"].Visible = false;
             dgvExchange.Columns["GstAmt"].Visible = false;
             dgvExchange.Columns["Gross"].Visible = false;
+            dgvExchange.Columns["AutoDiscount"].Visible = false;
+            dgvExchange.Columns["ManualDiscount"].Visible = false;
+            dgvExchange.Columns["DiscountManual"].Visible = false;
             dgvExchange.Columns["Qty"].ReadOnly = false;
+            dgvExchange.Columns["Discount"].ReadOnly = false;
             dgvExchange.Columns["ItemName"].ReadOnly = true;
             dgvExchange.Columns["ItemCode"].ReadOnly = true;
             dgvExchange.Columns["Price"].ReadOnly = true;
@@ -710,56 +757,78 @@ namespace BubbyPlanetShowroom
                     od.item_id,
                     i.item_code,
                     i.item_name,
+                    IFNULL(i.size, '') AS size,
                     od.qty,
-                    IFNULL(od.return_qty,0) return_qty,
+                    IFNULL(od.return_qty,0) AS return_qty,
+                    (od.qty - IFNULL(od.return_qty,0)) AS remaining_qty,
                     od.selling_price,
                     od.gross_amount,
                     od.discount_percent,
                     od.discount_amount,
                     od.taxable_amount,
                     od.gst_amount,
-                    od.net_amount
+                    od.net_amount,
+                    IFNULL(od.is_exchange, 0) AS is_exchange
                 FROM inv_order_details od
                 JOIN inv_items_master i ON i.id = od.item_id
-                WHERE od.order_id = @orderId";
+                WHERE od.order_id = @orderId
+                ORDER BY od.id ASC";
 
                 MySqlDataAdapter da = new MySqlDataAdapter(itemQuery, con);
                 da.SelectCommand.Parameters.AddWithValue("@orderId", parsedOrderId);
 
+                // Older DBs may not have is_exchange yet.
+                EnsureOrderDetailExchangeColumn(con);
+
                 DataTable dt = new DataTable();
                 da.Fill(dt);
+
+                if (dt.Rows.Count == 0)
+                {
+                    MessageBox.Show("No items found on this order.");
+                    return;
+                }
 
                 bool hasReturnableItem = false;
                 foreach (DataRow drItem in dt.Rows)
                 {
-                    int qty = Convert.ToInt32(drItem["qty"]);
-                    int returned = Convert.ToInt32(drItem["return_qty"]);
-                    if (qty - returned > 0)
+                    int remaining = Convert.ToInt32(drItem["remaining_qty"]);
+                    if (remaining > 0)
                     {
                         hasReturnableItem = true;
                         break;
                     }
                 }
 
-                if (!hasReturnableItem)
-                {
-                    MessageBox.Show("All items are already fully returned for this order.");
-                    grid.DataSource = null;
-                    grid.Rows.Clear();
-                    grid.Columns.Clear();
-                    SetProcessEnabled(false);
-                    btnReset.Enabled = true;
-                    btnReset.BackColor = ResetEnabledColor;
-                    return;
-                }
-
                 BindOrderItemsGrid(dt);
                 grid.Enabled = true;
-                SetProcessEnabled(grid.Rows.Count > 0);
                 btnReset.Enabled = true;
                 btnReset.BackColor = ResetEnabledColor;
                 ClearExchangeItems();
                 RefreshExchangeCalculation();
+
+                if (!hasReturnableItem)
+                {
+                    MessageBox.Show(
+                        "Is bill ke saare items pehle hi return ho chuke hain.\n" +
+                        "Neeche pehle returned / exchange items ka detail dikh raha hai.");
+                    SetProcessEnabled(false);
+                }
+                else
+                {
+                    SetProcessEnabled(true);
+                }
+            }
+        }
+
+        private void EnsureOrderDetailExchangeColumn(MySqlConnection con)
+        {
+            try
+            {
+                DB.EnsureColumnExists(con, "inv_order_details", "is_exchange", "TINYINT(1) NOT NULL DEFAULT 0");
+            }
+            catch
+            {
             }
         }
 
@@ -818,8 +887,11 @@ namespace BubbyPlanetShowroom
             {
                 lblCalcBalance.Text = "Refund to customer: ₹ " + summary.ReturnValue.ToString("0.00");
                 lblCalcBalance.ForeColor = summary.ReturnValue > 0 ? SuccessGreen : Slate;
-                lblCalcHint.Text = "Pure return mode — cash refund.\nAdd exchange items to keep same bill.";
+                lblCalcHint.Text = "Pure return mode.\nAdd exchange items to keep same bill.";
                 btnProcess.Text = "Process Return";
+                UpdateSettlementPaymentUi(
+                    summary.ReturnValue > 0 ? "refund" : "",
+                    summary.ReturnValue);
             }
             else if (summary.Shortfall > 0)
             {
@@ -827,16 +899,52 @@ namespace BubbyPlanetShowroom
                 lblCalcBalance.ForeColor = Color.FromArgb(220, 38, 38);
                 lblCalcHint.Text = "Mall rule: new items must be ≥ return value.\nAdd more / higher value items.";
                 btnProcess.Text = "Process Exchange";
+                UpdateSettlementPaymentUi("", 0);
             }
             else
             {
                 lblCalcBalance.Text = "Balance due (collect): ₹ " + summary.BalanceDue.ToString("0.00");
                 lblCalcBalance.ForeColor = PrimaryBlue;
                 lblCalcHint.Text = summary.BalanceDue == 0
-                    ? "Even exchange — no cash.\nSame bill will be updated + printed."
-                    : "Customer pays only the extra amount.\nSame bill updated — no new invoice.";
+                    ? "Even exchange — no money move.\nSame bill updated + printed."
+                    : "Customer pays only the extra.\nCash = counter cash badhega.";
                 btnProcess.Text = "Process Exchange";
+                UpdateSettlementPaymentUi(
+                    summary.BalanceDue > 0 ? "collect" : "",
+                    summary.BalanceDue);
             }
+        }
+
+        private void UpdateSettlementPaymentUi(string settlementType, decimal amount)
+        {
+            bool needPayment = amount > 0 &&
+                (settlementType == "collect" || settlementType == "refund");
+
+            lblPaymentMethod.Visible = needPayment;
+            cmbPaymentMethod.Visible = needPayment;
+            cmbPaymentMethod.Enabled = needPayment;
+
+            if (!needPayment)
+            {
+                lblPaymentMethod.Text = "Payment:";
+                return;
+            }
+
+            if (settlementType == "collect")
+                lblPaymentMethod.Text = "Collect via:";
+            else
+                lblPaymentMethod.Text = "Refund via:";
+
+            if (cmbPaymentMethod.SelectedIndex < 0)
+                cmbPaymentMethod.SelectedIndex = 0;
+        }
+
+        private string GetSelectedPaymentMethod()
+        {
+            string method = cmbPaymentMethod?.Text?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(method))
+                return "Cash";
+            return method;
         }
 
         private void TryAddExchangeItem()
@@ -858,6 +966,8 @@ namespace BubbyPlanetShowroom
             {
                 using MySqlConnection con = DB.GetConnection();
                 con.Open();
+                DB.EnsureAgeDiscountSchema(con);
+
                 using MySqlCommand cmd = new MySqlCommand(@"
                     SELECT
                         i.id,
@@ -885,12 +995,17 @@ namespace BubbyPlanetShowroom
                 decimal price = Convert.ToDecimal(reader["selling_price"]);
                 decimal gstPercent = Convert.ToDecimal(reader["GST"]);
                 int stockQty = Convert.ToInt32(reader["stock_qty"]);
+                reader.Close();
 
                 if (stockQty <= 0)
                 {
                     MessageBox.Show("Stock not available for this item.");
                     return;
                 }
+
+                // Same auto-discount path as Receipt (age/category/staff). No reward on exchange add.
+                bool isStaff = AutoDiscountHelper.IsStaffMobile(con, currentCustomerPhone);
+                decimal autoDiscount = AutoDiscountHelper.GetAutoDiscountPercent(con, itemCode, isStaff);
 
                 foreach (DataGridViewRow existing in dgvExchange.Rows)
                 {
@@ -903,6 +1018,15 @@ namespace BubbyPlanetShowroom
                             return;
                         }
                         existing.Cells["Qty"].Value = qty + 1;
+
+                        if (!IsExchangeManualDiscountRow(existing))
+                        {
+                            existing.Cells["AutoDiscount"].Value = autoDiscount;
+                            existing.Cells["ManualDiscount"].Value = 0;
+                            existing.Cells["DiscountManual"].Value = 0;
+                            existing.Cells["Discount"].Value = autoDiscount;
+                        }
+
                         RecalcExchangeRow(existing);
                         RefreshExchangeCalculation();
                         txtExchangeCode.Clear();
@@ -911,20 +1035,24 @@ namespace BubbyPlanetShowroom
                     }
                 }
 
-                ReturnCalculations.CalculateLineAmounts(price, gstPercent, 0, 1,
+                ReturnCalculations.CalculateLineAmounts(price, gstPercent, autoDiscount, 1,
                     out decimal taxable, out decimal gstAmt, out decimal gross, out decimal net);
 
                 dgvExchange.Rows.Add(
                     itemName,
                     itemCode,
                     price.ToString("0.00"),
+                    autoDiscount.ToString("0.##"),
                     1,
                     gstPercent.ToString("0.##"),
                     net.ToString("0.00"),
                     itemId,
                     taxable.ToString("0.00"),
                     gstAmt.ToString("0.00"),
-                    gross.ToString("0.00"));
+                    gross.ToString("0.00"),
+                    autoDiscount,
+                    0,
+                    0);
 
                 RefreshExchangeCalculation();
                 txtExchangeCode.Clear();
@@ -934,6 +1062,14 @@ namespace BubbyPlanetShowroom
             {
                 MessageBox.Show("Could not add item: " + ex.Message);
             }
+        }
+
+        private bool IsExchangeManualDiscountRow(DataGridViewRow row)
+        {
+            object? manualVal = row.Cells["DiscountManual"]?.Value ?? 0;
+            if (manualVal is bool b)
+                return b;
+            return manualVal.ToString() == "1";
         }
 
         private void RemoveSelectedExchangeItem()
@@ -948,7 +1084,24 @@ namespace BubbyPlanetShowroom
         {
             if (e.RowIndex < 0) return;
             DataGridViewRow row = dgvExchange.Rows[e.RowIndex];
-            if (dgvExchange.Columns[e.ColumnIndex].Name != "Qty")
+            string colName = dgvExchange.Columns[e.ColumnIndex].Name;
+
+            if (colName == "Discount")
+            {
+                // Manual sale discount lock — same idea as Receipt (no reward stacking here).
+                if (!decimal.TryParse(row.Cells["Discount"].Value?.ToString(), out decimal disc) || disc < 0)
+                    disc = 0;
+                disc = AutoDiscountHelper.ClampDiscount(disc);
+                row.Cells["DiscountManual"].Value = 1;
+                row.Cells["ManualDiscount"].Value = disc;
+                row.Cells["AutoDiscount"].Value = 0;
+                row.Cells["Discount"].Value = disc.ToString("0.##");
+                RecalcExchangeRow(row);
+                RefreshExchangeCalculation();
+                return;
+            }
+
+            if (colName != "Qty")
                 return;
 
             if (!int.TryParse(row.Cells["Qty"].Value?.ToString(), out int qty) || qty <= 0)
@@ -968,7 +1121,16 @@ namespace BubbyPlanetShowroom
             int.TryParse(row.Cells["Qty"].Value?.ToString(), out int qty);
             if (qty <= 0) qty = 1;
 
-            ReturnCalculations.CalculateLineAmounts(price, gstPercent, 0, qty,
+            decimal discount = 0;
+            if (IsExchangeManualDiscountRow(row))
+                decimal.TryParse(row.Cells["ManualDiscount"].Value?.ToString(), out discount);
+            else if (!decimal.TryParse(row.Cells["Discount"].Value?.ToString(), out discount))
+                decimal.TryParse(row.Cells["AutoDiscount"].Value?.ToString(), out discount);
+
+            discount = AutoDiscountHelper.ClampDiscount(discount);
+            row.Cells["Discount"].Value = discount.ToString("0.##");
+
+            ReturnCalculations.CalculateLineAmounts(price, gstPercent, discount, qty,
                 out decimal taxable, out decimal gstAmt, out decimal gross, out decimal net);
 
             row.Cells["Qty"].Value = qty;
@@ -1020,12 +1182,19 @@ namespace BubbyPlanetShowroom
 
                 grid.Columns["item_code"].HeaderText = "Code";
                 grid.Columns["item_name"].HeaderText = "Item Name";
+                if (grid.Columns.Contains("size"))
+                    grid.Columns["size"].HeaderText = "Size";
                 grid.Columns["qty"].HeaderText = "Qty";
                 grid.Columns["return_qty"].HeaderText = "Returned";
+                if (grid.Columns.Contains("remaining_qty"))
+                    grid.Columns["remaining_qty"].HeaderText = "Left";
                 grid.Columns["selling_price"].HeaderText = "Price";
                 grid.Columns["discount_percent"].HeaderText = "Disc %";
                 grid.Columns["gst_amount"].HeaderText = "GST";
                 grid.Columns["net_amount"].HeaderText = "Net";
+
+                if (grid.Columns.Contains("is_exchange"))
+                    grid.Columns["is_exchange"].Visible = false;
 
                 grid.Columns["selling_price"].DefaultCellStyle.Format = "0.00";
                 grid.Columns["gst_amount"].DefaultCellStyle.Format = "0.00";
@@ -1036,12 +1205,14 @@ namespace BubbyPlanetShowroom
                 // Horizontal scroll appears instead of truncating headers.
                 grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
                 grid.Columns["item_name"].AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-                grid.Columns["item_name"].MinimumWidth = 160;
+                grid.Columns["item_name"].MinimumWidth = 140;
                 grid.Columns["item_name"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleLeft;
                 grid.Columns["item_name"].HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleLeft;
 
                 void FixCol(string name, int width, DataGridViewContentAlignment align = DataGridViewContentAlignment.MiddleCenter)
                 {
+                    if (!grid.Columns.Contains(name))
+                        return;
                     var col = grid.Columns[name];
                     col.Visible = true;
                     col.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
@@ -1064,7 +1235,7 @@ namespace BubbyPlanetShowroom
                     if (measured > codeWidth)
                         codeWidth = measured;
                 }
-                codeWidth = Math.Clamp(codeWidth, 130, 320);
+                codeWidth = Math.Clamp(codeWidth, 110, 280);
 
                 FixCol("item_code", codeWidth, DataGridViewContentAlignment.MiddleLeft);
                 grid.Columns["item_code"].DefaultCellStyle.Font = codeFont;
@@ -1072,19 +1243,37 @@ namespace BubbyPlanetShowroom
                 grid.Columns["item_code"].DefaultCellStyle.WrapMode = DataGridViewTriState.False;
                 grid.Columns["item_code"].DefaultCellStyle.Padding = new Padding(4, 0, 4, 0);
 
-                FixCol("qty", 55);
-                FixCol("return_qty", 92);   // "Returned"
-                FixCol("selling_price", 78, DataGridViewContentAlignment.MiddleRight);
-                FixCol("discount_percent", 78); // "Disc %"
-                FixCol("gst_amount", 70, DataGridViewContentAlignment.MiddleRight);
-                FixCol("net_amount", 85, DataGridViewContentAlignment.MiddleRight);
+                FixCol("size", 70);
+                FixCol("qty", 50);
+                FixCol("return_qty", 78);
+                FixCol("remaining_qty", 55);
+                FixCol("selling_price", 72, DataGridViewContentAlignment.MiddleRight);
+                FixCol("discount_percent", 70);
+                FixCol("gst_amount", 65, DataGridViewContentAlignment.MiddleRight);
+                FixCol("net_amount", 80, DataGridViewContentAlignment.MiddleRight);
+
+                if (!grid.Columns.Contains("LineType"))
+                {
+                    DataGridViewTextBoxColumn typeCol = new DataGridViewTextBoxColumn();
+                    typeCol.Name = "LineType";
+                    typeCol.HeaderText = "Type";
+                    typeCol.ReadOnly = true;
+                    typeCol.SortMode = DataGridViewColumnSortMode.NotSortable;
+                    grid.Columns.Add(typeCol);
+                }
+                FixCol("LineType", 85);
+
+                // Returned qty (return_qty) already shows what came back — no separate Status column.
+                grid.Columns["return_qty"].HeaderText = "Returned";
+                FixCol("return_qty", 78);
+                grid.Columns["return_qty"].DefaultCellStyle.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
 
                 DataGridViewTextBoxColumn returnQtyCol = new DataGridViewTextBoxColumn();
                 returnQtyCol.Name = "ReturnQty";
                 returnQtyCol.HeaderText = "Return";
                 returnQtyCol.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
-                returnQtyCol.Width = 78;
-                returnQtyCol.MinimumWidth = 78;
+                returnQtyCol.Width = 70;
+                returnQtyCol.MinimumWidth = 70;
                 returnQtyCol.Resizable = DataGridViewTriState.False;
                 returnQtyCol.SortMode = DataGridViewColumnSortMode.NotSortable;
                 grid.Columns.Add(returnQtyCol);
@@ -1094,24 +1283,29 @@ namespace BubbyPlanetShowroom
                 refundCol.HeaderText = "Refund";
                 refundCol.ReadOnly = true;
                 refundCol.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
-                refundCol.Width = 90;
-                refundCol.MinimumWidth = 90;
+                refundCol.Width = 85;
+                refundCol.MinimumWidth = 85;
                 refundCol.Resizable = DataGridViewTriState.False;
                 refundCol.SortMode = DataGridViewColumnSortMode.NotSortable;
                 refundCol.DefaultCellStyle.Format = "0.00";
                 grid.Columns.Add(refundCol);
 
-                // Code before Item Name
-                grid.Columns["item_code"].DisplayIndex = 0;
-                grid.Columns["item_name"].DisplayIndex = 1;
-                grid.Columns["qty"].DisplayIndex = 2;
-                grid.Columns["return_qty"].DisplayIndex = 3;
-                grid.Columns["selling_price"].DisplayIndex = 4;
-                grid.Columns["discount_percent"].DisplayIndex = 5;
-                grid.Columns["gst_amount"].DisplayIndex = 6;
-                grid.Columns["net_amount"].DisplayIndex = 7;
-                grid.Columns["ReturnQty"].DisplayIndex = 8;
-                grid.Columns["Refund"].DisplayIndex = 9;
+                int di = 0;
+                grid.Columns["item_code"].DisplayIndex = di++;
+                grid.Columns["item_name"].DisplayIndex = di++;
+                if (grid.Columns.Contains("size"))
+                    grid.Columns["size"].DisplayIndex = di++;
+                grid.Columns["LineType"].DisplayIndex = di++;
+                grid.Columns["qty"].DisplayIndex = di++;
+                grid.Columns["return_qty"].DisplayIndex = di++;
+                if (grid.Columns.Contains("remaining_qty"))
+                    grid.Columns["remaining_qty"].DisplayIndex = di++;
+                grid.Columns["selling_price"].DisplayIndex = di++;
+                grid.Columns["discount_percent"].DisplayIndex = di++;
+                grid.Columns["gst_amount"].DisplayIndex = di++;
+                grid.Columns["net_amount"].DisplayIndex = di++;
+                grid.Columns["ReturnQty"].DisplayIndex = di++;
+                grid.Columns["Refund"].DisplayIndex = di++;
 
                 foreach (DataGridViewColumn column in grid.Columns)
                 {
@@ -1123,7 +1317,6 @@ namespace BubbyPlanetShowroom
                     column.HeaderCell.Style.WrapMode = DataGridViewTriState.False;
                 }
 
-                // Only Return is editable. Code/others are ReadOnly but selectable for copy.
                 grid.Columns["item_code"].ReadOnly = true;
                 grid.Columns["ReturnQty"].ReadOnly = false;
                 grid.Columns["ReturnQty"].HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
@@ -1135,13 +1328,50 @@ namespace BubbyPlanetShowroom
                 grid.Columns["Refund"].HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
                 grid.Columns["Refund"].DefaultCellStyle.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
 
+                Color fullyReturnedBg = Color.FromArgb(241, 245, 249);
+                Color exchangeBg = Color.FromArgb(236, 253, 245);
+                Color returnedQtyHighlight = Color.FromArgb(254, 226, 226);
+
                 foreach (DataGridViewRow row in grid.Rows)
                 {
                     if (row.IsNewRow)
                         continue;
 
+                    int qty = Convert.ToInt32(row.Cells["qty"].Value);
+                    int returned = Convert.ToInt32(row.Cells["return_qty"].Value);
+                    int remaining = grid.Columns.Contains("remaining_qty")
+                        ? Convert.ToInt32(row.Cells["remaining_qty"].Value)
+                        : Math.Max(0, qty - returned);
+
+                    bool isExchange = false;
+                    if (grid.Columns.Contains("is_exchange"))
+                    {
+                        object? exVal = row.Cells["is_exchange"].Value;
+                        isExchange = exVal != null && exVal != DBNull.Value && Convert.ToInt32(exVal) == 1;
+                    }
+
+                    row.Cells["LineType"].Value = isExchange ? "New/Exchange" : "Original";
                     row.Cells["ReturnQty"].Value = 0;
                     row.Cells["Refund"].Value = "0.00";
+
+                    // Returned column itself marks prior returns (0 = not returned yet).
+                    if (returned > 0)
+                    {
+                        row.Cells["return_qty"].Style.BackColor = returnedQtyHighlight;
+                        row.Cells["return_qty"].Style.ForeColor = Color.FromArgb(185, 28, 28);
+                    }
+
+                    if (remaining <= 0)
+                    {
+                        row.DefaultCellStyle.BackColor = fullyReturnedBg;
+                        row.DefaultCellStyle.ForeColor = Color.FromArgb(100, 116, 139);
+                        row.Cells["ReturnQty"].ReadOnly = true;
+                        row.Cells["ReturnQty"].Style.BackColor = fullyReturnedBg;
+                    }
+                    else if (isExchange)
+                    {
+                        row.DefaultCellStyle.BackColor = exchangeBg;
+                    }
                 }
 
                 SetRefundDisplay(0);
@@ -1157,6 +1387,18 @@ namespace BubbyPlanetShowroom
             // Block edit on every column except Return (Code stays copyable via selection)
             string colName = grid.Columns[e.ColumnIndex].Name;
             if (!string.Equals(colName, "ReturnQty", StringComparison.Ordinal))
+            {
+                e.Cancel = true;
+                return;
+            }
+
+            DataGridViewRow row = grid.Rows[e.RowIndex];
+            int qty = Convert.ToInt32(row.Cells["qty"].Value);
+            int returned = Convert.ToInt32(row.Cells["return_qty"].Value);
+            int remaining = grid.Columns.Contains("remaining_qty")
+                ? Convert.ToInt32(row.Cells["remaining_qty"].Value)
+                : Math.Max(0, qty - returned);
+            if (remaining <= 0)
                 e.Cancel = true;
         }
 
@@ -1315,6 +1557,34 @@ namespace BubbyPlanetShowroom
                 return;
             }
 
+            string settlementType = "";
+            decimal settlementAmount = 0;
+            if (isExchange && exchangeSummary.BalanceDue > 0)
+            {
+                settlementType = "collect";
+                settlementAmount = exchangeSummary.BalanceDue;
+            }
+            else if (!isExchange && exchangeSummary.ReturnValue > 0)
+            {
+                settlementType = "refund";
+                settlementAmount = exchangeSummary.ReturnValue;
+            }
+
+            string paymentMethod = GetSelectedPaymentMethod();
+            if (settlementAmount > 0)
+            {
+                if (cmbPaymentMethod.SelectedIndex < 0 || string.IsNullOrWhiteSpace(paymentMethod))
+                {
+                    MessageBox.Show(
+                        settlementType == "collect"
+                            ? "Balance collect ke liye Payment Method choose karein (Cash / Online)."
+                            : "Refund ke liye Payment Method choose karein (Cash / Online).");
+                    cmbPaymentMethod.Visible = true;
+                    cmbPaymentMethod.Focus();
+                    return;
+                }
+            }
+
             // Resume policy: ONLY after Process Return starts (this point).
             // Search / qty typing before this — no checkpoint; crash = re-enter return.
             PendingReturnCheckpoint pending = BuildPendingReturnCheckpoint(
@@ -1324,7 +1594,10 @@ namespace BubbyPlanetShowroom
                 returnValue,
                 exchangeValue,
                 0,
-                exchangeSummary.BalanceDue);
+                exchangeSummary.BalanceDue,
+                paymentMethod,
+                settlementType,
+                settlementAmount);
             PendingReturnStore.Save(pending);
 
             isProcessingReturn = true;
@@ -1335,12 +1608,16 @@ namespace BubbyPlanetShowroom
             pendingTotalRefund = 0;
             pendingBalanceDue = 0;
             pendingIsExchange = isExchange;
+            pendingPaymentMethod = paymentMethod;
+            pendingSettlementType = settlementType;
+            pendingSettlementAmount = settlementAmount;
 
             try
             {
                 using (MySqlConnection con = DB.GetConnection())
                 {
                     con.Open();
+                    EnsureOrderDetailExchangeColumn(con);
                     using MySqlTransaction transaction = con.BeginTransaction();
                     try
                     {
@@ -1368,6 +1645,9 @@ namespace BubbyPlanetShowroom
                             decimal subtotalCurrent;
                             decimal tax;
                             string itemCode;
+                            decimal sellingPrice = 0;
+                            decimal discPercent = 0;
+                            string size = "";
 
                             using (MySqlCommand fetchCmd = new MySqlCommand(@"
                                 SELECT
@@ -1375,10 +1655,13 @@ namespace BubbyPlanetShowroom
                                     IFNULL(od.return_qty, 0) AS return_qty,
                                     od.gross_amount,
                                     od.discount_amount,
+                                    IFNULL(od.discount_percent, 0) AS discount_percent,
+                                    od.selling_price,
                                     od.taxable_amount,
                                     od.gst_amount,
                                     od.net_amount,
-                                    i.item_code
+                                    i.item_code,
+                                    IFNULL(i.size, '') AS size
                                 FROM inv_order_details od
                                 JOIN inv_items_master i ON i.id = od.item_id
                                 WHERE od.id = @id
@@ -1397,6 +1680,9 @@ namespace BubbyPlanetShowroom
                                 subtotalCurrent = Convert.ToDecimal(detailReader["taxable_amount"]);
                                 tax = Convert.ToDecimal(detailReader["gst_amount"]);
                                 itemCode = detailReader["item_code"]?.ToString() ?? "";
+                                sellingPrice = Convert.ToDecimal(detailReader["selling_price"]);
+                                discPercent = Convert.ToDecimal(detailReader["discount_percent"]);
+                                size = detailReader["size"]?.ToString() ?? "";
                             }
 
                             if (returnedAlready + returnNow > qty)
@@ -1456,8 +1742,15 @@ namespace BubbyPlanetShowroom
                             pendingPrintLines.Add(new ReturnReceiptLine
                             {
                                 ItemName = itemName,
+                                ItemCode = itemCode,
+                                Size = size,
                                 Qty = returnNow,
-                                Refund = refund
+                                Price = sellingPrice,
+                                DiscountPercent = discPercent,
+                                Gross = Round2(gross - lineResult.NewGrossAmount),
+                                Taxable = Round2(subtotalCurrent - lineResult.NewTaxableAmount),
+                                Gst = Round2(tax - lineResult.NewGstAmount),
+                                Net = refund
                             });
                         }
 
@@ -1477,7 +1770,21 @@ namespace BubbyPlanetShowroom
                                 decimal taxable = Convert.ToDecimal(exRow.Cells["Taxable"].Value);
                                 decimal gstAmt = Convert.ToDecimal(exRow.Cells["GstAmt"].Value);
                                 decimal net = Convert.ToDecimal(exRow.Cells["Net"].Value);
+                                decimal.TryParse(exRow.Cells["Discount"].Value?.ToString(), out decimal discPercent);
+                                discPercent = AutoDiscountHelper.ClampDiscount(discPercent);
                                 decimal discountAmount = Round2(gross - (taxable + gstAmt));
+
+                                string size = "";
+                                try
+                                {
+                                    using MySqlCommand sizeCmd = new MySqlCommand(
+                                        "SELECT IFNULL(size,'') FROM inv_items_master WHERE id=@id LIMIT 1",
+                                        con, transaction);
+                                    sizeCmd.Parameters.AddWithValue("@id", itemId);
+                                    object? sz = sizeCmd.ExecuteScalar();
+                                    size = sz?.ToString() ?? "";
+                                }
+                                catch { }
 
                                 using (MySqlCommand stockCheck = new MySqlCommand(@"
                                     SELECT IFNULL(quantity, 0)
@@ -1498,20 +1805,22 @@ namespace BubbyPlanetShowroom
                                     (
                                         order_id, item_id, qty, selling_price,
                                         gross_amount, discount_percent, discount_amount,
-                                        taxable_amount, gst_amount, net_amount
+                                        taxable_amount, gst_amount, net_amount,
+                                        is_exchange
                                     )
                                     VALUES
                                     (
                                         @oid, @iid, @qty, @price,
                                         @gross, @discPercent, @discAmt,
-                                        @taxable, @gst, @net
+                                        @taxable, @gst, @net,
+                                        1
                                     )", con, transaction);
                                 insertCmd.Parameters.AddWithValue("@oid", orderId);
                                 insertCmd.Parameters.AddWithValue("@iid", itemId);
                                 insertCmd.Parameters.AddWithValue("@qty", qty);
                                 insertCmd.Parameters.AddWithValue("@price", price);
                                 insertCmd.Parameters.AddWithValue("@gross", Round2(gross));
-                                insertCmd.Parameters.AddWithValue("@discPercent", 0);
+                                insertCmd.Parameters.AddWithValue("@discPercent", discPercent);
                                 insertCmd.Parameters.AddWithValue("@discAmt", Round2(discountAmount));
                                 insertCmd.Parameters.AddWithValue("@taxable", Round2(taxable));
                                 insertCmd.Parameters.AddWithValue("@gst", Round2(gstAmt));
@@ -1532,8 +1841,15 @@ namespace BubbyPlanetShowroom
                                 pendingExchangePrintLines.Add(new ReturnReceiptLine
                                 {
                                     ItemName = itemName,
+                                    ItemCode = itemCode,
+                                    Size = size,
                                     Qty = qty,
-                                    Refund = net
+                                    Price = price,
+                                    DiscountPercent = discPercent,
+                                    Gross = Round2(gross),
+                                    Taxable = Round2(taxable),
+                                    Gst = Round2(gstAmt),
+                                    Net = Round2(net)
                                 });
                             }
                         }
@@ -1577,6 +1893,22 @@ namespace BubbyPlanetShowroom
 
                         // Return + exchange must NOT change reward_last_order_id.
 
+                        if (settlementAmount > 0 &&
+                            (settlementType == "collect" || settlementType == "refund"))
+                        {
+                            DB.EnsureReturnSettlementSchema(con);
+                            using MySqlCommand settleCmd = new MySqlCommand(@"
+                                INSERT INTO inv_return_settlements
+                                (order_id, settlement_type, payment_method, amount, created_at)
+                                VALUES
+                                (@oid, @stype, @pmethod, @amount, NOW())", con, transaction);
+                            settleCmd.Parameters.AddWithValue("@oid", orderId);
+                            settleCmd.Parameters.AddWithValue("@stype", settlementType);
+                            settleCmd.Parameters.AddWithValue("@pmethod", paymentMethod);
+                            settleCmd.Parameters.AddWithValue("@amount", Round2(settlementAmount));
+                            settleCmd.ExecuteNonQuery();
+                        }
+
                         // Persist print payload BEFORE commit (crash-safe resume).
                         if (isExchange)
                         {
@@ -1596,7 +1928,10 @@ namespace BubbyPlanetShowroom
                             returnValue,
                             exchangeValue,
                             pendingTotalRefund,
-                            pendingBalanceDue);
+                            pendingBalanceDue,
+                            paymentMethod,
+                            settlementType,
+                            settlementAmount);
                         FillPendingPrintLines(pending);
                         PendingReturnStore.Save(pending);
 
@@ -1605,18 +1940,31 @@ namespace BubbyPlanetShowroom
 
                         if (isExchange)
                         {
+                            string payLine = exchangeSummary.BalanceDue > 0
+                                ? "\nCollect (" + paymentMethod + "): ₹ " + exchangeSummary.BalanceDue.ToString("0.00")
+                                : "\nEven exchange — no money.";
+                            if (exchangeSummary.BalanceDue > 0 &&
+                                paymentMethod.Equals("Cash", StringComparison.OrdinalIgnoreCase))
+                            {
+                                payLine += "\n(Counter cash badhega)";
+                            }
+
                             MessageBox.Show(
                                 "Exchange Completed on Same Bill\n\n" +
                                 "Order ID: " + orderId + "\n" +
                                 "Return value: ₹ " + exchangeSummary.ReturnValue.ToString("0.00") + "\n" +
-                                "New items: ₹ " + exchangeSummary.NewItemsValue.ToString("0.00") + "\n" +
-                                "Collect from customer: ₹ " + exchangeSummary.BalanceDue.ToString("0.00"));
+                                "New items: ₹ " + exchangeSummary.NewItemsValue.ToString("0.00") +
+                                payLine);
                         }
                         else
                         {
+                            string refundLine =
+                                "Total Refund (" + paymentMethod + "): ₹ " + totalRefund.ToString("0.00");
+                            if (paymentMethod.Equals("Cash", StringComparison.OrdinalIgnoreCase))
+                                refundLine += "\n(Counter cash kam hoga)";
+
                             MessageBox.Show(
-                                "Return Completed Successfully\n\n" +
-                                "Total Refund Amount: ₹ " + totalRefund.ToString("0.00"));
+                                "Return Completed Successfully\n\n" + refundLine);
                         }
                     }
                     catch
@@ -1637,7 +1985,10 @@ namespace BubbyPlanetShowroom
                         returnValue,
                         exchangeValue,
                         0,
-                        exchangeSummary.BalanceDue));
+                        exchangeSummary.BalanceDue,
+                        paymentMethod,
+                        settlementType,
+                        settlementAmount));
                 }
                 catch { }
 
@@ -1682,14 +2033,23 @@ namespace BubbyPlanetShowroom
                     "\n\nApp dubara khologe to reprint resume ho sakta hai.");
             }
 
-            try
-            {
-                LoadOrder(parsedOrderId);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("Return saved, but order reload failed: " + ex.Message);
-            }
+            // Fresh screen for next return (same as Reset).
+            CompleteReturnUiReset();
+        }
+
+        private void CompleteReturnUiReset()
+        {
+            pendingPrintLines.Clear();
+            pendingExchangePrintLines.Clear();
+            pendingTotalRefund = 0;
+            pendingBalanceDue = 0;
+            pendingIsExchange = false;
+            pendingPaymentMethod = "Cash";
+            pendingSettlementType = "";
+            pendingSettlementAmount = 0;
+            txtOrderId.Text = "";
+            ResetReturnForm();
+            txtOrderId.Focus();
         }
 
         private PendingReturnCheckpoint BuildPendingReturnCheckpoint(
@@ -1699,7 +2059,10 @@ namespace BubbyPlanetShowroom
             decimal returnValue,
             decimal exchangeValue,
             decimal totalRefund,
-            decimal balanceDue)
+            decimal balanceDue,
+            string paymentMethod = "Cash",
+            string settlementType = "",
+            decimal settlementAmount = 0)
         {
             var checkpoint = new PendingReturnCheckpoint
             {
@@ -1713,7 +2076,10 @@ namespace BubbyPlanetShowroom
                 TotalRefund = totalRefund,
                 BalanceDue = balanceDue,
                 ReturnValue = returnValue,
-                ExchangeValue = exchangeValue
+                ExchangeValue = exchangeValue,
+                PaymentMethod = string.IsNullOrWhiteSpace(paymentMethod) ? "Cash" : paymentMethod.Trim(),
+                SettlementType = settlementType ?? "",
+                SettlementAmount = Round2(settlementAmount)
             };
 
             if (grid.Columns.Contains("id") && grid.Columns.Contains("ReturnQty"))
@@ -1756,7 +2122,11 @@ namespace BubbyPlanetShowroom
                     Gross = Convert.ToDecimal(exRow.Cells["Gross"].Value),
                     Taxable = Convert.ToDecimal(exRow.Cells["Taxable"].Value),
                     GstAmt = Convert.ToDecimal(exRow.Cells["GstAmt"].Value),
-                    Net = Convert.ToDecimal(exRow.Cells["Net"].Value)
+                    Net = Convert.ToDecimal(exRow.Cells["Net"].Value),
+                    DiscountPercent = decimal.TryParse(exRow.Cells["Discount"].Value?.ToString(), out decimal d) ? d : 0,
+                    AutoDiscount = decimal.TryParse(exRow.Cells["AutoDiscount"].Value?.ToString(), out decimal a) ? a : 0,
+                    ManualDiscount = decimal.TryParse(exRow.Cells["ManualDiscount"].Value?.ToString(), out decimal m) ? m : 0,
+                    DiscountManual = IsExchangeManualDiscountRow(exRow)
                 });
             }
 
@@ -1770,24 +2140,44 @@ namespace BubbyPlanetShowroom
 
             foreach (ReturnReceiptLine line in pendingPrintLines)
             {
-                checkpoint.PrintReturnLines.Add(new PendingReturnPrintLine
-                {
-                    ItemName = line.ItemName,
-                    Qty = line.Qty,
-                    Amount = line.Refund
-                });
+                checkpoint.PrintReturnLines.Add(ToPendingPrintLine(line));
             }
 
             foreach (ReturnReceiptLine line in pendingExchangePrintLines)
             {
-                checkpoint.PrintExchangeLines.Add(new PendingReturnPrintLine
-                {
-                    ItemName = line.ItemName,
-                    Qty = line.Qty,
-                    Amount = line.Refund
-                });
+                checkpoint.PrintExchangeLines.Add(ToPendingPrintLine(line));
             }
         }
+
+        private static PendingReturnPrintLine ToPendingPrintLine(ReturnReceiptLine line)
+            => new()
+            {
+                ItemName = line.ItemName,
+                ItemCode = line.ItemCode,
+                Size = line.Size,
+                Qty = line.Qty,
+                Price = line.Price,
+                DiscountPercent = line.DiscountPercent,
+                Gross = line.Gross,
+                Taxable = line.Taxable,
+                Gst = line.Gst,
+                Net = line.Net
+            };
+
+        private static ReturnReceiptLine FromPendingPrintLine(PendingReturnPrintLine line)
+            => new()
+            {
+                ItemName = line.ItemName,
+                ItemCode = line.ItemCode,
+                Size = line.Size,
+                Qty = line.Qty,
+                Price = line.Price,
+                DiscountPercent = line.DiscountPercent,
+                Gross = line.Gross,
+                Taxable = line.Taxable,
+                Gst = line.Gst,
+                Net = line.Net != 0 ? line.Net : line.Amount
+            };
 
         private void ApplyPendingPrintLinesToMemory(PendingReturnCheckpoint pending)
         {
@@ -1796,29 +2186,18 @@ namespace BubbyPlanetShowroom
             pendingIsExchange = pending.IsExchange;
             pendingTotalRefund = pending.TotalRefund;
             pendingBalanceDue = pending.BalanceDue;
+            pendingPaymentMethod = string.IsNullOrWhiteSpace(pending.PaymentMethod) ? "Cash" : pending.PaymentMethod;
+            pendingSettlementType = pending.SettlementType ?? "";
+            pendingSettlementAmount = pending.SettlementAmount;
             currentCustomerName = pending.CustomerName ?? "";
             currentCustomerPhone = pending.CustomerPhone ?? "";
             currentOrderDate = pending.OrderDate;
 
             foreach (PendingReturnPrintLine line in pending.PrintReturnLines)
-            {
-                pendingPrintLines.Add(new ReturnReceiptLine
-                {
-                    ItemName = line.ItemName,
-                    Qty = line.Qty,
-                    Refund = line.Amount
-                });
-            }
+                pendingPrintLines.Add(FromPendingPrintLine(line));
 
             foreach (PendingReturnPrintLine line in pending.PrintExchangeLines)
-            {
-                pendingExchangePrintLines.Add(new ReturnReceiptLine
-                {
-                    ItemName = line.ItemName,
-                    Qty = line.Qty,
-                    Refund = line.Amount
-                });
-            }
+                pendingExchangePrintLines.Add(FromPendingPrintLine(line));
         }
 
         private bool IsReturnAlreadyAppliedInDb(PendingReturnCheckpoint pending)
@@ -1884,8 +2263,7 @@ namespace BubbyPlanetShowroom
                         ? "Exchange reprint done ✅\nOrder ID: " + pending.OrderId
                         : "Return reprint done ✅\nOrder ID: " + pending.OrderId);
 
-                try { LoadOrder(pending.OrderId); }
-                catch { }
+                CompleteReturnUiReset();
             }
             catch (Exception ex)
             {
@@ -1997,15 +2375,26 @@ namespace BubbyPlanetShowroom
                         ex.ItemName,
                         ex.ItemCode,
                         ex.Price.ToString("0.00"),
+                        ex.DiscountPercent.ToString("0.##"),
                         ex.Qty,
                         ex.GstPercent.ToString("0.##"),
                         ex.Net.ToString("0.00"),
                         ex.ItemId,
                         ex.Taxable.ToString("0.00"),
                         ex.GstAmt.ToString("0.00"),
-                        ex.Gross.ToString("0.00"));
+                        ex.Gross.ToString("0.00"),
+                        ex.AutoDiscount,
+                        ex.ManualDiscount,
+                        ex.DiscountManual ? 1 : 0);
                 }
                 RefreshExchangeCalculation();
+
+                if (!string.IsNullOrWhiteSpace(pending.PaymentMethod) && cmbPaymentMethod.Items.Count > 0)
+                {
+                    int idx = cmbPaymentMethod.FindStringExact(pending.PaymentMethod);
+                    if (idx >= 0)
+                        cmbPaymentMethod.SelectedIndex = idx;
+                }
 
                 BtnProcess_Click(btnProcess, EventArgs.Empty);
             }
@@ -2018,158 +2407,261 @@ namespace BubbyPlanetShowroom
         private void PrintDoc_PrintPage(object sender, PrintPageEventArgs e)
         {
             Graphics g = e.Graphics;
-
             g.TranslateTransform(-e.PageSettings.HardMarginX, -e.PageSettings.HardMarginY);
 
-            Font font = new Font("Segoe UI", 9);
-            Font bold = new Font("Segoe UI", 9, FontStyle.Bold);
-            Font header = new Font("Segoe UI", 10, FontStyle.Bold);
+            int pageWidth = e.PageSettings.PaperSize.Width;
+            Font headerFont = new Font("Segoe UI", 12, FontStyle.Bold);
+            Font normalFont = new Font("Segoe UI", 8);
+            Font boldFont = new Font("Segoe UI", 8, FontStyle.Bold);
+            Font totalFont = new Font("Segoe UI", 10, FontStyle.Bold);
+            Font policyFont = new Font("Segoe UI", 7);
+            Font policyHeaderFont = new Font("Segoe UI", 8, FontStyle.Bold);
+            Font billTypeFont = new Font("Segoe UI", 10, FontStyle.Bold);
 
             float y = 5;
-            string returnId = "RET-" + DateTime.Now.ToString("yyyyMMddHHmmss");
-            int pageWidth = e.PageSettings.PaperSize.Width;
+            int itemNumber = 1;
+            int gatewayQuantity = 0;
+            decimal taxableTotal = 0;
+            decimal gstTotal = 0;
+            decimal netTotalReturned = 0;
+            decimal netTotalNew = 0;
 
-            // 1) Store details (centered)
-            SizeF storeSize = g.MeasureString(StoreName, header);
-            g.DrawString(StoreName, header, Brushes.Black, (pageWidth - storeSize.Width) / 2, y);
-            y += 15;
-            SizeF add1 = g.MeasureString(StoreAddressLine1, font);
-            g.DrawString(StoreAddressLine1, font, Brushes.Black, (pageWidth - add1.Width) / 2, y);
+            // ===== Header (same as Receipt) =====
+            string title = StoreName;
+            SizeF titleSize = g.MeasureString(title, headerFont);
+            g.DrawString(title, headerFont, Brushes.Black, (pageWidth - titleSize.Width) / 2, y);
+            y += 20;
+            SizeF add1Size = g.MeasureString(StoreAddressLine1, normalFont);
+            g.DrawString(StoreAddressLine1, normalFont, Brushes.Black, (pageWidth - add1Size.Width) / 2, y);
             y += 13;
-            SizeF add2 = g.MeasureString(StoreAddressLine2, font);
-            g.DrawString(StoreAddressLine2, font, Brushes.Black, (pageWidth - add2.Width) / 2, y);
-            y += 13;
-            string phoneLine = "Phone: " + StorePhone;
-            SizeF phoneSize = g.MeasureString(phoneLine, font);
-            g.DrawString(phoneLine, font, Brushes.Black, (pageWidth - phoneSize.Width) / 2, y);
-            y += 15;
-
-            // 2) Heading (centered)
-            string heading = pendingIsExchange ? "EXCHANGE BILL" : "RETURN RECEIPT";
-            SizeF headingSize = g.MeasureString(heading, bold);
-            g.DrawString(heading, bold, Brushes.Black, (pageWidth - headingSize.Width) / 2, y);
+            SizeF add2Size = g.MeasureString(StoreAddressLine2, normalFont);
+            g.DrawString(StoreAddressLine2, normalFont, Brushes.Black, (pageWidth - add2Size.Width) / 2, y);
             y += 15;
 
-            // 3) Return id
-            g.DrawString((pendingIsExchange ? "Exchange ID: " : "Return ID: ") + returnId, font, Brushes.Black, 5, y);
-            y += 13;
+            string billHeading = "RETURN BILL";
+            SizeF billHeadingSize = g.MeasureString(billHeading, billTypeFont);
+            g.DrawString(billHeading, billTypeFont, Brushes.Black, (pageWidth - billHeadingSize.Width) / 2, y);
+            y += 18;
 
-            // 4) Original invoice id
-            g.DrawString("Invoice ID: " + txtOrderId.Text, font, Brushes.Black, 5, y);
-            y += 13;
-
-            // 5) Date-time (original bill date + process time)
-            g.DrawString("Bill Date: " + currentOrderDate.ToString("dd-MM-yyyy HH:mm"), font, Brushes.Black, 5, y);
-            y += 13;
-            g.DrawString("Processed: " + DateTime.Now.ToString("dd-MM-yyyy HH:mm"), font, Brushes.Black, 5, y);
-            y += 13;
-
-            // 6) Customer details
-            string customer = string.IsNullOrWhiteSpace(currentCustomerName) ? "Walk-in Customer" : currentCustomerName;
-            string phone = currentCustomerPhone ?? "";
-            g.DrawString("Customer: " + customer, font, Brushes.Black, 5, y);
-            y += 13;
-            if (!string.IsNullOrWhiteSpace(phone))
-                g.DrawString("Phone: " + phone, font, Brushes.Black, 5, y);
-            else
-                g.DrawString("Phone: —", font, Brushes.Black, 5, y);
-            y += 12;
-
-            g.DrawString("-----------------------------------------------", font, Brushes.Black, 5, y);
-            y += 12;
-
-            g.DrawString(pendingIsExchange ? "RETURNED ITEMS" : "ITEMS", bold, Brushes.Black, 5, y);
-            y += 14;
-            g.DrawString("Item", bold, Brushes.Black, 5, y);
-            g.DrawString("Qty", bold, Brushes.Black, 160, y);
-            g.DrawString("Amt", bold, Brushes.Black, 220, y);
+            string invoiceText = "Invoice: " + (txtOrderId.Text.Trim().Length > 0 ? txtOrderId.Text.Trim() : "?");
+            g.DrawString(invoiceText, normalFont, Brushes.Black, 5, y);
+            y += 15;
+            g.DrawString("Date: " + DateTime.Now.ToString("dd-MM-yyyy HH:mm"), normalFont, Brushes.Black, 5, y);
+            y += 15;
+            g.DrawString("Original Bill: " + currentOrderDate.ToString("dd-MM-yyyy HH:mm"), normalFont, Brushes.Black, 5, y);
             y += 15;
 
-            g.DrawString("-----------------------------------------------", font, Brushes.Black, 5, y);
-            y += 10;
-            decimal totalReturnAmount = 0;
+            string customer = string.IsNullOrWhiteSpace(currentCustomerName) ? "Walk-in" : currentCustomerName;
+            string phone = string.IsNullOrWhiteSpace(currentCustomerPhone) ? "-" : currentCustomerPhone;
+            g.DrawString("Customer: " + customer, normalFont, Brushes.Black, 5, y);
+            y += 15;
+            g.DrawString("Mobile: " + phone, normalFont, Brushes.Black, 5, y);
+            y += 15;
+
+            g.DrawString(new string('-', 48), normalFont, Brushes.Black, 5, y);
+            y += 15;
+
+            // ===== Returned items (Receipt-style lines) =====
+            g.DrawString("RETURNED ITEMS", boldFont, Brushes.Black, 5, y);
+            y += 15;
 
             foreach (ReturnReceiptLine line in pendingPrintLines)
             {
-                string name = line.ItemName;
-                int qty = line.Qty;
-                decimal refund = line.Refund;
-                totalReturnAmount += refund;
-
-                if (name.Length > 18)
-                {
-                    g.DrawString(name.Substring(0, 18), font, Brushes.Black, 5, y);
-                    y += 12;
-                    g.DrawString(name.Substring(18), font, Brushes.Black, 5, y);
-                }
-                else
-                {
-                    g.DrawString(name, font, Brushes.Black, 5, y);
-                }
-
-                g.DrawString(qty.ToString(), font, Brushes.Black, 160, y);
-                g.DrawString(refund.ToString("0.00"), font, Brushes.Black, 220, y);
-                y += 18;
+                y = DrawReceiptStyleItem(g, pageWidth, y, normalFont, boldFont, itemNumber++, line);
+                gatewayQuantity += line.Qty;
+                taxableTotal += line.Taxable;
+                gstTotal += line.Gst;
+                netTotalReturned += line.Net;
             }
+
+            // ===== New exchange items =====
+            if (pendingIsExchange && pendingExchangePrintLines.Count > 0)
+            {
+                g.DrawString("NEW ITEMS", boldFont, Brushes.Black, 5, y);
+                y += 15;
+
+                foreach (ReturnReceiptLine line in pendingExchangePrintLines)
+                {
+                    y = DrawReceiptStyleItem(g, pageWidth, y, normalFont, boldFont, itemNumber++, line);
+                    gatewayQuantity += line.Qty;
+                    taxableTotal += line.Taxable;
+                    gstTotal += line.Gst;
+                    netTotalNew += line.Net;
+                }
+            }
+
+            g.DrawString("Gate check quantity: " + gatewayQuantity, totalFont, Brushes.Black, 5, y);
+            y += 15;
+
+            g.DrawString(new string('-', 48), normalFont, Brushes.Black, 5, y);
+            y += 15;
 
             if (pendingIsExchange)
             {
-                y += 6;
-                g.DrawString("-----------------------------------------------", font, Brushes.Black, 5, y);
-                y += 12;
-                g.DrawString("NEW ITEMS", bold, Brushes.Black, 5, y);
-                y += 14;
-                g.DrawString("Item", bold, Brushes.Black, 5, y);
-                g.DrawString("Qty", bold, Brushes.Black, 160, y);
-                g.DrawString("Amt", bold, Brushes.Black, 220, y);
-                y += 15;
-                g.DrawString("-----------------------------------------------", font, Brushes.Black, 5, y);
-                y += 10;
-
-                decimal newTotal = 0;
-                foreach (ReturnReceiptLine line in pendingExchangePrintLines)
-                {
-                    string name = line.ItemName;
-                    int qty = line.Qty;
-                    decimal amt = line.Refund;
-                    newTotal += amt;
-
-                    if (name.Length > 18)
-                    {
-                        g.DrawString(name.Substring(0, 18), font, Brushes.Black, 5, y);
-                        y += 12;
-                        g.DrawString(name.Substring(18), font, Brushes.Black, 5, y);
-                    }
-                    else
-                    {
-                        g.DrawString(name, font, Brushes.Black, 5, y);
-                    }
-
-                    g.DrawString(qty.ToString(), font, Brushes.Black, 160, y);
-                    g.DrawString(amt.ToString("0.00"), font, Brushes.Black, 220, y);
-                    y += 18;
-                }
-
-                y += 8;
-                g.DrawString("-----------------------------------------------", font, Brushes.Black, 5, y);
-                y += 14;
-                g.DrawString("Return value : ₹ " + totalReturnAmount.ToString("0.00"), font, Brushes.Black, 5, y);
-                y += 14;
-                g.DrawString("New items    : ₹ " + newTotal.ToString("0.00"), font, Brushes.Black, 5, y);
-                y += 14;
-                g.DrawString("BALANCE DUE  : ₹ " + pendingBalanceDue.ToString("0.00"), bold, Brushes.Black, 5, y);
+                g.DrawString("RETURN VALUE: " + netTotalReturned.ToString("0.00"), totalFont, Brushes.Black, 5, y);
                 y += 18;
+                g.DrawString("NEW ITEMS: " + netTotalNew.ToString("0.00"), totalFont, Brushes.Black, 5, y);
+                y += 18;
+                g.DrawString("BALANCE DUE: " + pendingBalanceDue.ToString("0.00"), totalFont, Brushes.Black, 5, y);
+                y += 18;
+                if (pendingBalanceDue > 0)
+                {
+                    g.DrawString("Payment: " + pendingPaymentMethod, boldFont, Brushes.Black, 5, y);
+                    y += 22;
+                }
+                else
+                {
+                    y += 4;
+                }
             }
             else
             {
-                y += 10;
-                g.DrawString("-----------------------------------------------", font, Brushes.Black, 5, y);
-                y += 15;
-                g.DrawString("TOTAL REFUND : ₹ " + pendingTotalRefund.ToString("0.00"), bold, Brushes.Black, 5, y);
-                y += 20;
+                g.DrawString("TOTAL REFUND: " + pendingTotalRefund.ToString("0.00"), totalFont, Brushes.Black, 5, y);
+                y += 18;
+                if (pendingTotalRefund > 0)
+                {
+                    g.DrawString("Refund via: " + pendingPaymentMethod, boldFont, Brushes.Black, 5, y);
+                    y += 22;
+                }
+                else
+                {
+                    y += 4;
+                }
             }
 
-            g.DrawString("Thank You!", font, Brushes.Black, 90, y);
+            g.DrawString("Taxable: " + Round2(taxableTotal).ToString("0.00"), normalFont, Brushes.Black, 5, y);
+            y += 15;
+            g.DrawString("GST: " + Round2(gstTotal).ToString("0.00"), normalFont, Brushes.Black, 5, y);
+            y += 15;
+            decimal cgstTotal = Round2(gstTotal / 2m);
+            decimal sgstTotal = Round2(gstTotal - cgstTotal);
+            g.DrawString("CGST: " + cgstTotal.ToString("0.00") + "  SGST: " + sgstTotal.ToString("0.00"), normalFont, Brushes.Black, 5, y);
+            y += 18;
+
+            g.DrawString("Phone: " + StorePhone, normalFont, Brushes.Black, 5, y);
+            y += 15;
+            g.DrawString("Email: " + StoreEmail, normalFont, Brushes.Black, 5, y);
+            y += 15;
+            g.DrawString("Website: " + StoreWebsite, normalFont, Brushes.Black, 5, y);
+            y += 22;
+
+            g.DrawString(new string('-', 48), normalFont, Brushes.Black, 5, y);
+            y += 14;
+            g.DrawString("Return Policy", policyHeaderFont, Brushes.Black, 5, y);
+            y += 13;
+            g.DrawString("1. Return window: within 7 days from bill date.", policyFont, Brushes.Black, 5, y);
+            y += 11;
+            g.DrawString("2. Original bill/invoice required.", policyFont, Brushes.Black, 5, y);
+            y += 11;
+            g.DrawString("3. Item must be unused, unwashed, tags and box intact.", policyFont, Brushes.Black, 5, y);
+            y += 11;
+            g.DrawString("4. Garments (altered/stitched) are non-returnable.", policyFont, Brushes.Black, 5, y);
+            y += 11;
+            g.DrawString("5. Footwear with used/dirty sole non-returnable; box required.", policyFont, Brushes.Black, 5, y);
+            y += 11;
+            g.DrawString("6. Toys opened/damaged seal/battery-used usually non-returnable,", policyFont, Brushes.Black, 5, y);
+            y += 10;
+            g.DrawString("   unless manufacturing defect.", policyFont, Brushes.Black, 5, y);
+            y += 11;
+            g.DrawString("7. Socks/innerwear/accessories mostly non-returnable.", policyFont, Brushes.Black, 5, y);
+            y += 11;
+            g.DrawString("8. No cash refund. Exchange only for same or higher value item.", policyFont, Brushes.Black, 5, y);
+            y += 11;
+            g.DrawString("9. Counter checks: barcode match, tag match, invoice match.", policyFont, Brushes.Black, 5, y);
+            y += 16;
+
+            if (int.TryParse(txtOrderId.Text.Trim(), out int orderIdForBarcode) && orderIdForBarcode > 0)
+            {
+                using Bitmap? barcodeImage = GenerateOrderBarcode(orderIdForBarcode.ToString());
+                if (barcodeImage != null)
+                {
+                    int barcodeWidth = 180;
+                    int barcodeHeight = 50;
+                    float barcodeX = (pageWidth - barcodeWidth) / 2f;
+                    g.DrawImage(barcodeImage, barcodeX, y, barcodeWidth, barcodeHeight);
+                    y += barcodeHeight + 5;
+
+                    Font textFont = new Font("Segoe UI", 9, FontStyle.Bold);
+                    string orderText = orderIdForBarcode.ToString();
+                    SizeF textSize = g.MeasureString(orderText, textFont);
+                    g.DrawString(orderText, textFont, Brushes.Black, (pageWidth - textSize.Width) / 2, y);
+                    y += textSize.Height + 5;
+                }
+            }
+
+            string thankYou = "Thank you for shopping with us";
+            SizeF thankSize = g.MeasureString(thankYou, normalFont);
+            g.DrawString(thankYou, normalFont, Brushes.Black, (pageWidth - thankSize.Width) / 2, y);
+
+            e.HasMorePages = false;
+        }
+
+        private float DrawReceiptStyleItem(
+            Graphics g,
+            int pageWidth,
+            float y,
+            Font normalFont,
+            Font boldFont,
+            int itemNumber,
+            ReturnReceiptLine line)
+        {
+            string name = line.ItemName ?? "";
+            string itemCode = line.ItemCode ?? "";
+            string size = string.IsNullOrWhiteSpace(line.Size) ? "-" : line.Size;
+            int qtyVal = line.Qty;
+            decimal priceVal = line.Price;
+            decimal grossVal = line.Gross;
+            decimal subtotalVal = line.Taxable;
+            decimal gstVal = line.Gst;
+            decimal totalVal = line.Net;
+            decimal discountPercentVal = line.DiscountPercent;
+            if (discountPercentVal < 0) discountPercentVal = 0;
+
+            decimal originalTotalInclTax = Round2(priceVal * qtyVal);
+            decimal discountAmountInclTax = Round2(originalTotalInclTax - totalVal);
+            if (discountAmountInclTax < 0) discountAmountInclTax = 0;
+
+            g.DrawString($"Item {itemNumber}: {name}", boldFont, Brushes.Black, 5, y);
+            y += 13;
+            g.DrawString($"Code: {itemCode}  Size : {size}", normalFont, Brushes.Black, 4, y);
+            y += 13;
+            g.DrawString($"Price: {priceVal:0.00}  Qty: {qtyVal}  Gross: {grossVal:0.00}", normalFont, Brushes.Black, 4, y);
+            y += 13;
+            g.DrawString($"Discount : {discountPercentVal:0.##}% (-{discountAmountInclTax:0.00})", normalFont, Brushes.Black, 4, y);
+            y += 13;
+            g.DrawString($"Taxable: {subtotalVal:0.00}  GST: {gstVal:0.00}", normalFont, Brushes.Black, 4, y);
+            y += 13;
+            g.DrawString($"Net: {totalVal:0.00}", boldFont, Brushes.Black, 6, y);
+            y += 15;
+            g.DrawString("--------------------------------", normalFont, Brushes.Black, 5, y);
+            y += 15;
+            return y;
+        }
+
+        private Bitmap? GenerateOrderBarcode(string text)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(text))
+                    return null;
+
+                var writer = new BarcodeWriter<Bitmap>
+                {
+                    Format = BarcodeFormat.CODE_128,
+                    Options = new ZXing.Common.EncodingOptions
+                    {
+                        Width = 180,
+                        Height = 50,
+                        Margin = 1
+                    },
+                    Renderer = new BitmapRenderer()
+                };
+                return writer.Write(text.Trim());
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private void BtnReset_Click(object sender, EventArgs e)
@@ -2206,30 +2698,29 @@ namespace BubbyPlanetShowroom
             SetProcessEnabled(false);
             btnReset.Enabled = false;
             btnReset.BackColor = DisabledButtonColor;
+
+            pendingPrintLines.Clear();
+            pendingExchangePrintLines.Clear();
+            pendingTotalRefund = 0;
+            pendingBalanceDue = 0;
+            pendingIsExchange = false;
+            pendingPaymentMethod = "Cash";
+            pendingSettlementType = "";
+            pendingSettlementAmount = 0;
+
+            if (cmbPaymentMethod.Items.Count > 0)
+                cmbPaymentMethod.SelectedIndex = 0;
+            UpdateSettlementPaymentUi("", 0);
         }
 
         private int CalculateReturnPrintHeight()
         {
-            int baseHeight = pendingIsExchange ? 380 : 290;
-            int perLineHeight = 18;
-            int printableLines = 0;
-
-            foreach (ReturnReceiptLine line in pendingPrintLines)
-            {
-                string name = line.ItemName ?? "";
-                printableLines += name.Length > 18 ? 2 : 1;
-            }
-
-            foreach (ReturnReceiptLine line in pendingExchangePrintLines)
-            {
-                string name = line.ItemName ?? "";
-                printableLines += name.Length > 18 ? 2 : 1;
-            }
-
-            if (printableLines <= 0)
-                printableLines = 1;
-
-            return baseHeight + (printableLines * perLineHeight);
+            // Receipt-style: ~110px per item block + header/footer/policy/barcode
+            int itemCount = pendingPrintLines.Count + pendingExchangePrintLines.Count;
+            if (itemCount <= 0) itemCount = 1;
+            int baseHeight = 520;
+            int perItem = 110;
+            return baseHeight + (itemCount * perItem);
         }
 
         private bool IsReturnAllowedWithin7Days(DateTime orderDate)

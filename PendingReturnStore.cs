@@ -39,13 +39,30 @@ namespace BubbyPlanetShowroom
         public decimal Taxable { get; set; }
         public decimal GstAmt { get; set; }
         public decimal Net { get; set; }
+        public decimal DiscountPercent { get; set; }
+        public decimal AutoDiscount { get; set; }
+        public decimal ManualDiscount { get; set; }
+        public bool DiscountManual { get; set; }
     }
 
     public sealed class PendingReturnPrintLine
     {
         public string ItemName { get; set; } = "";
+        public string ItemCode { get; set; } = "";
+        public string Size { get; set; } = "";
         public int Qty { get; set; }
-        public decimal Amount { get; set; }
+        public decimal Price { get; set; }
+        public decimal DiscountPercent { get; set; }
+        public decimal Gross { get; set; }
+        public decimal Taxable { get; set; }
+        public decimal Gst { get; set; }
+        public decimal Net { get; set; }
+        /// <summary>Back-compat with older pending files.</summary>
+        public decimal Amount
+        {
+            get => Net;
+            set => Net = value;
+        }
     }
 
     public sealed class PendingReturnCheckpoint
@@ -61,6 +78,11 @@ namespace BubbyPlanetShowroom
         public decimal BalanceDue { get; set; }
         public decimal ReturnValue { get; set; }
         public decimal ExchangeValue { get; set; }
+        /// <summary>Cash or Online — only when collect/refund amount &gt; 0.</summary>
+        public string PaymentMethod { get; set; } = "Cash";
+        /// <summary>collect | refund | empty</summary>
+        public string SettlementType { get; set; } = "";
+        public decimal SettlementAmount { get; set; }
         public List<PendingReturnLine> ReturnLines { get; set; } = new();
         public List<PendingExchangeLine> ExchangeLines { get; set; } = new();
         public List<PendingReturnPrintLine> PrintReturnLines { get; set; } = new();
