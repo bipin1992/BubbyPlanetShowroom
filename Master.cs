@@ -504,7 +504,9 @@ using System;
 using System.Data;
 using System.Drawing;
 using System.Drawing.Printing;
+using System.Globalization;
 using System.Windows.Forms;
+using MySql.Data.MySqlClient;
 
 namespace BubbyPlanetShowroom
 {
@@ -535,6 +537,8 @@ namespace BubbyPlanetShowroom
         int printQty = 1;
         int printedCount = 0;
         bool isLoading = false;
+        bool suppressPriceRecalc = false;
+        int editingRowIndex = -1;
         readonly string currentRole;
 
         public Master(string role = "")
@@ -630,7 +634,7 @@ namespace BubbyPlanetShowroom
             grid.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
 
             grid.CellClick += Grid_CellClick;
-            //grid.CellValueChanged += Grid_CellValueChanged;
+            grid.CellValueChanged += Grid_CellValueChanged;
 
             grid.CurrentCellDirtyStateChanged += (s, e) =>
             {
@@ -659,7 +663,8 @@ namespace BubbyPlanetShowroom
 
             grid.SelectionMode = DataGridViewSelectionMode.CellSelect;
             grid.MultiSelect = false;
-            grid.ReadOnly = true;
+            // Columns stay ReadOnly until Edit; id + item_code always locked.
+            grid.ReadOnly = false;
             grid.RowHeadersVisible = false; // left side arrow wala part
             grid.ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableWithoutHeaderText;
 
@@ -719,12 +724,14 @@ namespace BubbyPlanetShowroom
 
                 grid.Columns.Clear();
                 grid.DataSource = dt;
+                editingRowIndex = -1;
 
                 foreach (DataGridViewColumn col in grid.Columns)
                     col.ReadOnly = true;
 
                 ApplyRoleColumnVisibility();
                 AddButtons();
+                InitEditButtonLabels();
             }
             catch (Exception ex)
             {
@@ -747,18 +754,69 @@ namespace BubbyPlanetShowroom
 
         void AddButtons()
         {
-            //DataGridViewButtonColumn edit = new DataGridViewButtonColumn();
-            //edit.Name = "Edit";
-            //edit.Text = "Edit";
-            //edit.UseColumnTextForButtonValue = true;
+            if (!grid.Columns.Contains("Edit"))
+            {
+                DataGridViewButtonColumn edit = new DataGridViewButtonColumn();
+                edit.Name = "Edit";
+                edit.HeaderText = "Edit";
+                edit.Text = "Edit";
+                edit.UseColumnTextForButtonValue = false;
+                edit.ReadOnly = true;
+                grid.Columns.Add(edit);
+            }
 
-            DataGridViewButtonColumn print = new DataGridViewButtonColumn();
-            print.Name = "Print";
-            print.Text = "Print";
-            print.UseColumnTextForButtonValue = true;
+            if (!grid.Columns.Contains("Print"))
+            {
+                DataGridViewButtonColumn print = new DataGridViewButtonColumn();
+                print.Name = "Print";
+                print.HeaderText = "Print";
+                print.Text = "Print";
+                print.UseColumnTextForButtonValue = true;
+                print.ReadOnly = true;
+                grid.Columns.Add(print);
+            }
+        }
 
-            //grid.Columns.Add(edit);
-            grid.Columns.Add(print);
+        void InitEditButtonLabels()
+        {
+            if (!grid.Columns.Contains("Edit"))
+                return;
+
+            foreach (DataGridViewRow row in grid.Rows)
+            {
+                if (!row.IsNewRow)
+                    row.Cells["Edit"].Value = "Edit";
+            }
+        }
+
+        void SetRowEditable(DataGridViewRow row, bool editable)
+        {
+            foreach (DataGridViewColumn col in grid.Columns)
+            {
+                string name = col.Name;
+                if (name == "Edit" || name == "Print")
+                {
+                    col.ReadOnly = true;
+                    continue;
+                }
+
+                // Always locked — barcode identity must not change.
+                if (string.Equals(name, "id", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(name, "item_code", StringComparison.OrdinalIgnoreCase))
+                {
+                    row.Cells[name].ReadOnly = true;
+                    continue;
+                }
+
+                // Stock qty lives in inv_stock — do not edit master stock here.
+                if (string.Equals(name, "stock", StringComparison.OrdinalIgnoreCase))
+                {
+                    row.Cells[name].ReadOnly = true;
+                    continue;
+                }
+
+                row.Cells[name].ReadOnly = !editable;
+            }
         }
 
         void LoadMainCategory()
@@ -994,15 +1052,56 @@ namespace BubbyPlanetShowroom
                     grid.ClearSelection();
                     grid.Rows[e.RowIndex].Selected = true;
                 }
-                else
+                else if (colName != "Edit" && colName != "Print")
                 {
                     grid.ClearSelection();
                     grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Selected = true;
                 }
 
-                // 🔥 PRINT BUTTON (existing logic)
+                // EDIT / SAVE
+                if (colName == "Edit")
+                {
+                    DataGridViewRow row = grid.Rows[e.RowIndex];
+                    string mode = row.Cells["Edit"].Value?.ToString() ?? "Edit";
+
+                    if (string.Equals(mode, "Edit", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (editingRowIndex >= 0 && editingRowIndex != e.RowIndex)
+                        {
+                            MessageBox.Show("Pehle current row Save karein, phir dusri row Edit karein.");
+                            return;
+                        }
+
+                        SetRowEditable(row, true);
+                        row.Cells["Edit"].Value = "Save";
+                        editingRowIndex = e.RowIndex;
+                    }
+                    else
+                    {
+                        if (!ValidateEditableRow(row))
+                            return;
+
+                        UpdateRow(row);
+                        SetRowEditable(row, false);
+                        row.Cells["Edit"].Value = "Edit";
+                        editingRowIndex = -1;
+                        MessageBox.Show(
+                            "Item updated ✅\n\n" +
+                            "Nayi sale / exchange / label ab updated price & details use karenge.\n" +
+                            "Purane bills ke amounts change nahi hote.");
+                    }
+                    return;
+                }
+
+                // PRINT — reprint label for already-added item
                 if (colName == "Print")
                 {
+                    if (editingRowIndex == e.RowIndex)
+                    {
+                        MessageBox.Show("Pehle Save karein, phir Print.");
+                        return;
+                    }
+
                     var row = grid.Rows[e.RowIndex];
 
                     if (row.Cells["item_code"].Value == null)
@@ -1012,8 +1111,8 @@ namespace BubbyPlanetShowroom
                     }
 
                     _code = SafeText(row.Cells["item_code"].Value);
-                    _size = SafeText(row.Cells["size"].Value);
-                    _price = SafeText(row.Cells["selling_price"].Value);
+                    _size = SafeText(GetCellValue(row, "size"));
+                    _price = SafeText(GetCellValue(row, "selling_price"));
 
                     if (string.IsNullOrWhiteSpace(_code))
                     {
@@ -1031,25 +1130,150 @@ namespace BubbyPlanetShowroom
             }
         }
 
+        void Grid_CellValueChanged(object? sender, DataGridViewCellEventArgs e)
+        {
+            if (suppressPriceRecalc || isLoading || e.RowIndex < 0)
+                return;
+            if (e.RowIndex != editingRowIndex)
+                return;
+
+            string col = grid.Columns[e.ColumnIndex].Name;
+            if (!string.Equals(col, "price_before_tax", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(col, "gst", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(col, "GST", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            if (!grid.Columns.Contains("selling_price"))
+                return;
+
+            DataGridViewRow row = grid.Rows[e.RowIndex];
+            if (!TryParseDecimal(GetCellValue(row, "price_before_tax"), out decimal pbt))
+                return;
+            if (!TryParseDecimal(GetGstCellValue(row), out decimal gstPct))
+                return;
+
+            // Same formula as AddItem.CalcPrice (integer GST on PBT).
+            decimal gstAmount = Math.Floor(pbt * gstPct / 100m);
+            decimal selling = Math.Round(pbt + gstAmount, 2, MidpointRounding.AwayFromZero);
+
+            suppressPriceRecalc = true;
+            try
+            {
+                row.Cells["selling_price"].Value = selling;
+            }
+            finally
+            {
+                suppressPriceRecalc = false;
+            }
+        }
+
+        static object? GetCellValue(DataGridViewRow row, string columnName)
+        {
+            if (row.DataGridView == null)
+                return null;
+            if (!row.DataGridView.Columns.Contains(columnName))
+                return null;
+            return row.Cells[columnName].Value;
+        }
+
+        static string GetGstCellValue(DataGridViewRow row)
+        {
+            object? v = GetCellValue(row, "GST");
+            if (v != null && !string.IsNullOrWhiteSpace(v.ToString()))
+                return v.ToString() ?? "";
+            v = GetCellValue(row, "gst");
+            return v?.ToString() ?? "";
+        }
+
+        static bool TryParseDecimal(object? value, out decimal result)
+        {
+            result = 0;
+            if (value == null || value == DBNull.Value)
+                return false;
+            return decimal.TryParse(
+                value.ToString(),
+                NumberStyles.Any,
+                CultureInfo.InvariantCulture,
+                out result)
+                || decimal.TryParse(value.ToString(), out result);
+        }
+
+        bool ValidateEditableRow(DataGridViewRow row)
+        {
+            string name = SafeText(GetCellValue(row, "item_name"));
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                MessageBox.Show("Item name required.");
+                return false;
+            }
+
+            if (!TryParseDecimal(GetCellValue(row, "selling_price"), out decimal sell) || sell < 0)
+            {
+                MessageBox.Show("Valid selling price required.");
+                return false;
+            }
+
+            string gstRaw = GetGstCellValue(row);
+            if (!string.IsNullOrWhiteSpace(gstRaw) &&
+                (!TryParseDecimal(gstRaw, out decimal gst) || gst < 0 || gst > 100))
+            {
+                MessageBox.Show("GST must be between 0 and 100.");
+                return false;
+            }
+
+            return true;
+        }
 
         void UpdateRow(DataGridViewRow row)
         {
             int id = Convert.ToInt32(row.Cells["id"].Value);
 
-            string query = $@"
-            UPDATE inv_items_master SET
-            item_name='{row.Cells["item_name"].Value}',
-            main_category='{row.Cells["main_category"].Value}',
-            sub_category='{row.Cells["sub_category"].Value}',
-            gender='{row.Cells["gender"].Value}',
-            item_type='{row.Cells["item_type"].Value}',
-            price_before_tax='{row.Cells["price_before_tax"].Value}',
-            gst='{row.Cells["gst"].Value}',
-            selling_price='{row.Cells["selling_price"].Value}',
-            stock='{row.Cells["stock"].Value}'
-            WHERE id={id}";
+            using MySqlConnection con = DB.GetConnection();
+            con.Open();
 
-            DB.Execute(query);
+            using MySqlCommand cmd = new MySqlCommand(@"
+                UPDATE inv_items_master SET
+                    item_name = @item_name,
+                    main_category = @main_category,
+                    sub_category = @sub_category,
+                    gender = @gender,
+                    item_type = @item_type,
+                    actual_item = @actual_item,
+                    size = @size,
+                    color = @color,
+                    cost_price = @cost_price,
+                    price_before_tax = @price_before_tax,
+                    selling_price = @selling_price,
+                    brand = @brand,
+                    supplier_name = @supplier_name,
+                    GST = @gst
+                WHERE id = @id", con);
+
+            cmd.Parameters.AddWithValue("@id", id);
+            cmd.Parameters.AddWithValue("@item_name", SafeText(GetCellValue(row, "item_name")));
+            cmd.Parameters.AddWithValue("@main_category", SafeText(GetCellValue(row, "main_category")));
+            cmd.Parameters.AddWithValue("@sub_category", SafeText(GetCellValue(row, "sub_category")));
+            cmd.Parameters.AddWithValue("@gender", SafeText(GetCellValue(row, "gender")));
+            cmd.Parameters.AddWithValue("@item_type", SafeText(GetCellValue(row, "item_type")));
+            cmd.Parameters.AddWithValue("@actual_item", SafeText(GetCellValue(row, "actual_item")));
+            cmd.Parameters.AddWithValue("@size", SafeText(GetCellValue(row, "size")));
+            cmd.Parameters.AddWithValue("@color", SafeText(GetCellValue(row, "color")));
+            cmd.Parameters.AddWithValue("@brand", SafeText(GetCellValue(row, "brand")));
+            cmd.Parameters.AddWithValue("@supplier_name", SafeText(GetCellValue(row, "supplier_name")));
+
+            TryParseDecimal(GetCellValue(row, "cost_price"), out decimal cost);
+            TryParseDecimal(GetCellValue(row, "price_before_tax"), out decimal pbt);
+            TryParseDecimal(GetCellValue(row, "selling_price"), out decimal sell);
+            TryParseDecimal(GetGstCellValue(row), out decimal gst);
+
+            cmd.Parameters.AddWithValue("@cost_price", cost);
+            cmd.Parameters.AddWithValue("@price_before_tax", pbt);
+            cmd.Parameters.AddWithValue("@selling_price", sell);
+            cmd.Parameters.AddWithValue("@gst", gst);
+
+            int affected = cmd.ExecuteNonQuery();
+            if (affected == 0)
+                throw new Exception("Update failed — item not found.");
         }
 
         //void GenerateBarcode(string text)
