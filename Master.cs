@@ -506,6 +506,7 @@ using System.Drawing;
 using System.Drawing.Printing;
 using System.Globalization;
 using System.Windows.Forms;
+using Microsoft.VisualBasic;
 using MySql.Data.MySqlClient;
 
 namespace BubbyPlanetShowroom
@@ -1409,24 +1410,67 @@ namespace BubbyPlanetShowroom
                     return;
                 }
 
-                PrintDialog pd = new PrintDialog();
-                pd.Document = printDoc;
+                int stockQty = GetStockQuantity(_code);
+                string defaultQty = stockQty > 0 ? stockQty.ToString() : "1";
 
-                if (pd.ShowDialog() == DialogResult.OK)
+                string input = Interaction.InputBox(
+                    "Enter label quantity\n\nStock quantity: " + stockQty,
+                    "Print Labels",
+                    defaultQty);
+
+                if (string.IsNullOrWhiteSpace(input))
+                    return;
+
+                if (!int.TryParse(input.Trim(), out int qty) || qty <= 0)
                 {
-                    printDoc.PrinterSettings = pd.PrinterSettings;
-
-                    PaperSize labelSize = new PaperSize("Custom", 216, 98);
-
-                    printDoc.DefaultPageSettings.PaperSize = labelSize;
-                    printDoc.DefaultPageSettings.Margins = new Margins(0, 0, 0, 0);
-
-                    printDoc.Print();
+                    MessageBox.Show("Enter valid quantity.");
+                    return;
                 }
+
+                if (qty > short.MaxValue)
+                {
+                    MessageBox.Show("Quantity too large.");
+                    return;
+                }
+
+                PrinterRouting.ApplyLabelPrinter(printDoc);
+                printDoc.PrinterSettings.Copies = (short)qty;
+
+                PaperSize labelSize = new PaperSize("Custom", 216, 98);
+                printDoc.DefaultPageSettings.PaperSize = labelSize;
+                printDoc.DefaultPageSettings.Margins = new Margins(0, 0, 0, 0);
+
+                printDoc.Print();
             }
             catch (Exception ex)
             {
                 MessageBox.Show("Print Failed: " + ex.Message);
+            }
+        }
+
+        int GetStockQuantity(string itemCode)
+        {
+            if (string.IsNullOrWhiteSpace(itemCode))
+                return 0;
+
+            try
+            {
+                using MySqlConnection con = DB.GetConnection();
+                con.Open();
+                using MySqlCommand cmd = new MySqlCommand(@"
+                    SELECT IFNULL(quantity, 0)
+                    FROM inv_stock
+                    WHERE LOWER(TRIM(item_code)) = LOWER(TRIM(@code))
+                    LIMIT 1", con);
+                cmd.Parameters.AddWithValue("@code", itemCode.Trim());
+                object? result = cmd.ExecuteScalar();
+                if (result == null || result == DBNull.Value)
+                    return 0;
+                return Convert.ToInt32(result);
+            }
+            catch
+            {
+                return 0;
             }
         }
 
