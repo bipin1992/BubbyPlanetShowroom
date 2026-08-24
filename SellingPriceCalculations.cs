@@ -5,7 +5,7 @@ using System.Linq;
 namespace BubbyPlanetShowroom
 {
     /// <summary>
-    /// Business settings for marked-price calculation. Loaded from DB so values
+    /// Business settings for selling-price calculation. Loaded from DB so values
     /// are not hard-coded in the calculator.
     /// </summary>
     public sealed class PricingSettings
@@ -13,19 +13,21 @@ namespace BubbyPlanetShowroom
         public decimal MonthlyRent { get; set; } = 30000m;
         public decimal MonthlySalary { get; set; } = 30000m;
         public decimal ExpectedMonthlySales { get; set; } = 3000m;
-        public decimal DiscountPercent { get; set; } = 15m;
+        public decimal DiscountPercent { get; set; } = 0m;
         public int PriceEndingDigit { get; set; } = 9;
+        public decimal TotalTransportCost { get; set; } = 0m;
+        public int TotalParcelQuantity { get; set; } = 1;
         public List<ProfitMarginSlab> Slabs { get; set; } = CreateDefaultSlabs();
 
         public static List<ProfitMarginSlab> CreateDefaultSlabs()
         {
             return new List<ProfitMarginSlab>
             {
-                new ProfitMarginSlab { MinPurchaseCost = 0m, MaxPurchaseCost = 500m, MarginPercent = 50m },
-                new ProfitMarginSlab { MinPurchaseCost = 500m, MaxPurchaseCost = 1000m, MarginPercent = 45m },
-                new ProfitMarginSlab { MinPurchaseCost = 1000m, MaxPurchaseCost = 1500m, MarginPercent = 40m },
-                new ProfitMarginSlab { MinPurchaseCost = 1500m, MaxPurchaseCost = 2000m, MarginPercent = 35m },
-                new ProfitMarginSlab { MinPurchaseCost = 2000m, MaxPurchaseCost = null, MarginPercent = 30m }
+                new ProfitMarginSlab { MinPurchaseCost = 0m, MaxPurchaseCost = 500m, MarginPercent = 45m },
+                new ProfitMarginSlab { MinPurchaseCost = 500m, MaxPurchaseCost = 1000m, MarginPercent = 40m },
+                new ProfitMarginSlab { MinPurchaseCost = 1000m, MaxPurchaseCost = 1500m, MarginPercent = 35m },
+                new ProfitMarginSlab { MinPurchaseCost = 1500m, MaxPurchaseCost = 2000m, MarginPercent = 30m },
+                new ProfitMarginSlab { MinPurchaseCost = 2000m, MaxPurchaseCost = null, MarginPercent = 25m }
             };
         }
 
@@ -48,6 +50,15 @@ namespace BubbyPlanetShowroom
 
     public sealed class SellingPriceResult
     {
+        public decimal ItemPrice { get; init; }
+        public int Quantity { get; init; }
+        public decimal TotalTransportCost { get; init; }
+        public int TotalParcelQuantity { get; init; }
+        public decimal MonthlyRent { get; init; }
+        public decimal MonthlySalary { get; init; }
+        public decimal ExpectedMonthlySales { get; init; }
+        public decimal DiscountPercent { get; init; }
+        public int PriceEndingDigit { get; init; }
         public decimal PurchaseCostPerPiece { get; init; }
         public decimal TransportPerPiece { get; init; }
         public decimal RentPerPiece { get; init; }
@@ -67,7 +78,7 @@ namespace BubbyPlanetShowroom
     /// <summary>
     /// Pure selling-price math. UI-free so unit tests can lock the business examples.
     /// Profit margin is applied only to purchase cost per piece — never to
-    /// transport, rent, or salary.
+    /// rent or salary.
     /// </summary>
     public static class SellingPriceCalculations
     {
@@ -111,32 +122,26 @@ namespace BubbyPlanetShowroom
             return slabs.OrderBy(s => s.MinPurchaseCost).Last().MarginPercent;
         }
 
+        /// <summary>
+        /// Calculator entry point: item price + quantity.
+        /// </summary>
         public static SellingPriceResult Calculate(
-            decimal totalPurchaseCost,
+            decimal itemPrice,
             int quantity,
-            decimal totalTransportCost,
-            int totalParcelQuantity,
             PricingSettings settings)
         {
             if (settings == null)
                 throw new ArgumentNullException(nameof(settings));
-            if (totalPurchaseCost < 0m)
-                throw new ArgumentOutOfRangeException(nameof(totalPurchaseCost), "Purchase cost cannot be negative.");
+            if (itemPrice < 0m)
+                throw new ArgumentOutOfRangeException(nameof(itemPrice), "Purchase cost cannot be negative.");
             if (quantity <= 0)
                 throw new ArgumentOutOfRangeException(nameof(quantity), "Quantity must be at least 1.");
-            if (totalTransportCost < 0m)
-                throw new ArgumentOutOfRangeException(nameof(totalTransportCost), "Transport cost cannot be negative.");
-            if (totalParcelQuantity <= 0)
-                throw new ArgumentOutOfRangeException(nameof(totalParcelQuantity), "Parcel quantity must be at least 1.");
             if (settings.ExpectedMonthlySales <= 0m)
                 throw new InvalidOperationException("Expected monthly sales must be greater than 0.");
-            if (settings.DiscountPercent < 0m || settings.DiscountPercent >= 100m)
-                throw new InvalidOperationException("Discount percent must be 0 or more and less than 100.");
             if (settings.MonthlyRent < 0m || settings.MonthlySalary < 0m)
                 throw new InvalidOperationException("Monthly rent and salary cannot be negative.");
 
-            decimal purchasePerPiece = totalPurchaseCost / quantity;
-            decimal transportPerPiece = totalTransportCost / totalParcelQuantity;
+            decimal purchasePerPiece = itemPrice / quantity;
             decimal rentPerPiece = settings.MonthlyRent / settings.ExpectedMonthlySales;
             decimal salaryPerPiece = settings.MonthlySalary / settings.ExpectedMonthlySales;
 
@@ -146,33 +151,37 @@ namespace BubbyPlanetShowroom
             decimal requiredNet =
                 purchasePerPiece
                 + profitPerPiece
-                + transportPerPiece
                 + rentPerPiece
                 + salaryPerPiece;
 
-            decimal keepRatio = (100m - settings.DiscountPercent) / 100m;
-            decimal priceBeforeRounding = requiredNet / keepRatio;
+            decimal priceBeforeRounding = requiredNet;
             decimal finalPrice = RoundUpToEndingDigit(priceBeforeRounding, settings.PriceEndingDigit);
-
-            decimal discountAmount = Round2(finalPrice * settings.DiscountPercent / 100m);
-            decimal customerPayable = Round2(finalPrice - discountAmount);
-            decimal actualTotalCost = purchasePerPiece + transportPerPiece + rentPerPiece + salaryPerPiece;
-            decimal actualProfit = customerPayable - actualTotalCost;
+            decimal actualTotalCost = purchasePerPiece + rentPerPiece + salaryPerPiece;
+            decimal actualProfit = finalPrice - actualTotalCost;
 
             return new SellingPriceResult
             {
+                ItemPrice = Round2(itemPrice),
+                Quantity = quantity,
+                TotalTransportCost = 0m,
+                TotalParcelQuantity = 1,
+                MonthlyRent = Round2(settings.MonthlyRent),
+                MonthlySalary = Round2(settings.MonthlySalary),
+                ExpectedMonthlySales = settings.ExpectedMonthlySales,
+                DiscountPercent = 0m,
+                PriceEndingDigit = settings.PriceEndingDigit,
                 PurchaseCostPerPiece = Round2(purchasePerPiece),
-                TransportPerPiece = Round2(transportPerPiece),
+                TransportPerPiece = 0m,
                 RentPerPiece = Round2(rentPerPiece),
                 SalaryPerPiece = Round2(salaryPerPiece),
                 ProfitMarginPercent = marginPercent,
                 ProfitPerPiece = Round2(profitPerPiece),
                 RequiredNetPrice = Round2(requiredNet),
-                DiscountKeepRatio = keepRatio,
+                DiscountKeepRatio = 1m,
                 PriceBeforeRounding = Round2(priceBeforeRounding),
                 FinalSellingPrice = finalPrice,
-                DiscountAmount = discountAmount,
-                CustomerPayable = customerPayable,
+                DiscountAmount = 0m,
+                CustomerPayable = finalPrice,
                 ActualTotalCost = Round2(actualTotalCost),
                 ActualProfit = Round2(actualProfit)
             };

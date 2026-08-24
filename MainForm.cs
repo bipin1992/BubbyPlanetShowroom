@@ -32,6 +32,7 @@ namespace BubbyPlanetShowroom
         Dictionary<string, Button> menuButtons = new Dictionary<string, Button>();
         private Receipt? receiptPage;
         private Return? returnPage;
+        private SellingPrice? sellingPricePage;
         private InternetConnectivityMonitor? internetMonitor;
 
         public MainForm()
@@ -352,7 +353,7 @@ namespace BubbyPlanetShowroom
                         "Users" => new Users(),
                         "Revenue" => new Revenue(),
                         "Discount" => new DiscountManager(CurrentRole),
-                        "Selling Price" => new SellingPrice(CurrentRole),
+                        "Selling Price" => sellingPricePage ??= new SellingPrice(CurrentRole),
                         "Selling" => new Selling(),
                         "Closing Balance" => new ClosingBalance(),
                         _ => null
@@ -705,6 +706,7 @@ namespace BubbyPlanetShowroom
         {
             HideAllMenus();
             content.Controls.Clear();
+            sellingPricePage = null;
 
             lblUser.Text = "";
             CurrentRole = "";
@@ -723,12 +725,14 @@ namespace BubbyPlanetShowroom
                 string key = pair.Key;
                 bool show = false;
 
-                if (key == "Profile")
+                if (key == "Selling Price")
+                    show = role is "Master Admin" or "Admin";
+                else if (key == "Profile")
                     show = true;
                 else if (role == "Master Admin")
                     show = true;
                 else if (role == "Admin")
-                    show = key is "Add Item" or "Master" or "IN" or "Stock" or "Label" or "Receipt" or "Return" or "Selling Price" or "Closing Balance";
+                    show = key is "Add Item" or "Master" or "IN" or "Stock" or "Label" or "Receipt" or "Return" or "Closing Balance";
                 else if (role == "Cashier")
                     show = key is "Receipt" or "Return" or "IN" or "Stock" or "Label" or "Closing Balance";
 

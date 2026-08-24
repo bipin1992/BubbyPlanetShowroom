@@ -5,7 +5,7 @@ using MySql.Data.MySqlClient;
 namespace BubbyPlanetShowroom
 {
     /// <summary>
-    /// Loads and saves selling-price settings (rent, salary, discount, slabs).
+    /// Loads and saves selling-price settings (rent, salary, slabs).
     /// </summary>
     public static class PricingSettingsStore
     {
@@ -23,7 +23,8 @@ namespace BubbyPlanetShowroom
 
             using (MySqlCommand cmd = new MySqlCommand(
                 @"SELECT monthly_rent, monthly_salary, expected_monthly_sales,
-                         discount_percent, price_ending_digit
+                         discount_percent, price_ending_digit,
+                         total_transport_cost, total_parcel_quantity
                   FROM pricing_settings
                   WHERE id = 1",
                 conn))
@@ -34,8 +35,10 @@ namespace BubbyPlanetShowroom
                     settings.MonthlyRent = reader.GetDecimal("monthly_rent");
                     settings.MonthlySalary = reader.GetDecimal("monthly_salary");
                     settings.ExpectedMonthlySales = reader.GetDecimal("expected_monthly_sales");
-                    settings.DiscountPercent = reader.GetDecimal("discount_percent");
+                    settings.DiscountPercent = 0m;
                     settings.PriceEndingDigit = reader.GetInt32("price_ending_digit");
+                    settings.TotalTransportCost = 0m;
+                    settings.TotalParcelQuantity = 1;
                 }
             }
 
@@ -74,8 +77,6 @@ namespace BubbyPlanetShowroom
                 throw new InvalidOperationException("Save at least one profit-margin slab.");
             if (settings.ExpectedMonthlySales <= 0m)
                 throw new InvalidOperationException("Expected monthly sales must be greater than 0.");
-            if (settings.DiscountPercent < 0m || settings.DiscountPercent >= 100m)
-                throw new InvalidOperationException("Discount percent must be 0 or more and less than 100.");
             if (settings.PriceEndingDigit < 0 || settings.PriceEndingDigit > 9)
                 throw new InvalidOperationException("Price ending digit must be 0–9.");
 
@@ -88,22 +89,27 @@ namespace BubbyPlanetShowroom
             {
                 using (MySqlCommand cmd = new MySqlCommand(
                     @"INSERT INTO pricing_settings
-                        (id, monthly_rent, monthly_salary, expected_monthly_sales, discount_percent, price_ending_digit)
+                        (id, monthly_rent, monthly_salary, expected_monthly_sales, discount_percent, price_ending_digit,
+                         total_transport_cost, total_parcel_quantity)
                       VALUES
-                        (1, @rent, @salary, @sales, @discount, @ending)
+                        (1, @rent, @salary, @sales, @discount, @ending, @transport, @parcel)
                       ON DUPLICATE KEY UPDATE
                         monthly_rent = @rent,
                         monthly_salary = @salary,
                         expected_monthly_sales = @sales,
                         discount_percent = @discount,
-                        price_ending_digit = @ending",
+                        price_ending_digit = @ending,
+                        total_transport_cost = @transport,
+                        total_parcel_quantity = @parcel",
                     conn, tx))
                 {
                     cmd.Parameters.AddWithValue("@rent", settings.MonthlyRent);
                     cmd.Parameters.AddWithValue("@salary", settings.MonthlySalary);
                     cmd.Parameters.AddWithValue("@sales", settings.ExpectedMonthlySales);
-                    cmd.Parameters.AddWithValue("@discount", settings.DiscountPercent);
+                    cmd.Parameters.AddWithValue("@discount", 0m);
                     cmd.Parameters.AddWithValue("@ending", settings.PriceEndingDigit);
+                    cmd.Parameters.AddWithValue("@transport", 0m);
+                    cmd.Parameters.AddWithValue("@parcel", 1);
                     cmd.ExecuteNonQuery();
                 }
 

@@ -18,33 +18,41 @@ namespace BubbyPlanetShowroom
         private static readonly Color PrimaryBlue = Color.FromArgb(37, 99, 235);
         private static readonly Color Gold = Color.FromArgb(245, 158, 11);
 
+        private readonly bool canUsePage;
         private readonly bool canEditSettings;
         private PricingSettings settings = PricingSettings.CreateDefaults();
         private bool suppressCalc;
 
-        private NumericUpDown nudPurchase;
-        private NumericUpDown nudQty;
-        private NumericUpDown nudTransport;
-        private NumericUpDown nudParcelQty;
+        private TextBox txtItemPrice;
+        private TextBox txtQty;
+        private TextBox txtRent;
+        private TextBox txtSalary;
+        private TextBox txtExpectedSales;
+        private TextBox txtEnding;
 
+        private Label? lblSellingPrice;
         private Label lblFinalPrice;
-        private Label lblCustomerPays;
         private Label lblActualProfit;
         private Label lblStatus;
-        private TableLayoutPanel breakdownGrid;
+        private DataGridView dgvBreakdown;
 
         private NumericUpDown nudRent;
         private NumericUpDown nudSalary;
         private NumericUpDown nudExpectedSales;
-        private NumericUpDown nudDiscount;
         private NumericUpDown nudEnding;
         private DataGridView dgvSlabs;
 
         public SellingPrice(string role = "")
         {
-            canEditSettings = string.Equals((role ?? "").Trim(), "Master Admin", StringComparison.OrdinalIgnoreCase);
+            string currentRole = (role ?? "").Trim();
+            canUsePage = currentRole is "Master Admin" or "Admin";
+            canEditSettings = string.Equals(currentRole, "Master Admin", StringComparison.OrdinalIgnoreCase);
             InitializeUI();
-            Load += (_, _) => LoadSettingsFromDb();
+            Load += (_, _) =>
+            {
+                if (canUsePage)
+                    LoadSettingsFromDb();
+            };
         }
 
         private void InitializeUI()
@@ -65,6 +73,21 @@ namespace BubbyPlanetShowroom
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 26f));
             Controls.Add(root);
 
+            if (!canUsePage)
+            {
+                Label denied = new Label
+                {
+                    Dock = DockStyle.Fill,
+                    Text = "Selling Price is available only to Master Admin and Admin.",
+                    Font = new Font("Segoe UI", 12f, FontStyle.Bold),
+                    ForeColor = Slate,
+                    TextAlign = ContentAlignment.MiddleCenter
+                };
+                Controls.Add(denied);
+                denied.BringToFront();
+                return;
+            }
+
             Panel header = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 8) };
             header.Paint += (_, e) =>
             {
@@ -79,7 +102,7 @@ namespace BubbyPlanetShowroom
                     new Rectangle(16, 10, 480, 28), Color.White,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
                 using Font hintFont = new Font("Segoe UI", 8.5f);
-                TextRenderer.DrawText(e.Graphics, "Purchase + profit + overheads  ·  discount absorbed into marked price  ·  round up to ending digit", hintFont,
+                TextRenderer.DrawText(e.Graphics, "Item + qty ke saath rent aur salary yahin change ho sakte hain  ·  selling price turant dikhega", hintFont,
                     new Rectangle(16, 38, 720, 20), Color.FromArgb(204, 251, 241),
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
             };
@@ -128,57 +151,101 @@ namespace BubbyPlanetShowroom
             Panel inputCard = CreateCard();
             inputCard.Padding = new Padding(1);
             inputCard.Margin = new Padding(0, 0, 10, 0);
-            Panel inputHeader = CreateSectionHeader("INPUTS", "Invoice / parcel figures");
-            TableLayoutPanel form = new TableLayoutPanel
+            Panel inputHeader = CreateSectionHeader("INPUTS", "Defaults loaded — rent/salary later bhi change kar sakte ho");
+            Panel inputScroll = new Panel
             {
                 Dock = DockStyle.Fill,
+                AutoScroll = true,
+                BackColor = Color.White,
+                Padding = new Padding(12, 8, 12, 8)
+            };
+            TableLayoutPanel form = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = false,
+                Height = 500,
                 ColumnCount = 2,
-                RowCount = 8,
-                Padding = new Padding(16, 12, 16, 12),
+                RowCount = 11,
+                Padding = new Padding(4),
                 BackColor = Color.White
             };
             form.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 48f));
             form.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 52f));
-            for (int i = 0; i < 8; i++)
-                form.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
+            for (int i = 0; i < 11; i++)
+                form.RowStyles.Add(new RowStyle(SizeType.Absolute, i is 2 or 7 ? 28f : (i == 8 ? 78f : 36f)));
 
-            nudPurchase = MoneyBox(0m, 99999999.99m);
-            nudQty = IntBox(1, 1000000);
-            nudTransport = MoneyBox(0m, 99999999.99m);
-            nudParcelQty = IntBox(1, 1000000);
+            txtItemPrice = NumberBox(allowDecimal: true, placeholder: "e.g. 500");
+            txtQty = NumberBox(allowDecimal: false, placeholder: "e.g. 10");
+            txtRent = NumberBox(allowDecimal: true, placeholder: "30000");
+            txtSalary = NumberBox(allowDecimal: true, placeholder: "30000");
+            txtExpectedSales = NumberBox(allowDecimal: false, placeholder: "3000");
+            txtEnding = NumberBox(allowDecimal: false, placeholder: "9");
 
-            AddFormRow(form, 0, "Total Purchase Cost (₹)", nudPurchase);
-            AddFormRow(form, 1, "Item Quantity", nudQty);
-            AddFormRow(form, 2, "Total Transport Cost (₹)", nudTransport);
-            AddFormRow(form, 3, "Total Parcel Quantity", nudParcelQty);
+            suppressCalc = true;
+            txtRent.Text = "30000";
+            txtSalary.Text = "30000";
+            txtExpectedSales.Text = "3000";
+            txtEnding.Text = "9";
+            suppressCalc = false;
+
+            AddFormRow(form, 0, "Item Price (₹)", txtItemPrice);
+            AddFormRow(form, 1, "Quantity", txtQty);
+
+            Label overheadTitle = new Label
+            {
+                Dock = DockStyle.Fill,
+                Text = "MONTHLY  ·  default Rent ₹30,000  ·  Salary ₹30,000  ·  Items sold 3,000",
+                Font = new Font("Segoe UI", 8f, FontStyle.Bold),
+                ForeColor = Teal,
+                TextAlign = ContentAlignment.BottomLeft
+            };
+            form.Controls.Add(overheadTitle, 0, 2);
+            form.SetColumnSpan(overheadTitle, 2);
+
+            AddFormRow(form, 3, "Monthly Rent (₹)", txtRent);
+            AddFormRow(form, 4, "Monthly Salary (₹)", txtSalary);
+            AddFormRow(form, 5, "Monthly items sold (pcs)", txtExpectedSales);
+            AddFormRow(form, 6, "Price Ending Digit", txtEnding);
 
             Label hint = new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "Purchase is divided by item qty. Transport is divided by whole-parcel qty — not by this item's cost.",
+                Text = "Rent, salary aur monthly sold quantity default se bhari hain. Future mein yahin change karo.",
                 Font = new Font("Segoe UI", 8.5f),
                 ForeColor = Muted,
                 TextAlign = ContentAlignment.TopLeft
             };
-            form.Controls.Add(hint, 0, 4);
+            form.Controls.Add(hint, 0, 7);
             form.SetColumnSpan(hint, 2);
+
+            lblSellingPrice = new Label
+            {
+                Dock = DockStyle.Fill,
+                Text = "SELLING PRICE" + Environment.NewLine + "₹ —",
+                Font = new Font("Segoe UI", 18f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(120, 53, 15),
+                BackColor = Color.FromArgb(254, 243, 199),
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            form.Controls.Add(lblSellingPrice, 0, 8);
+            form.SetColumnSpan(lblSellingPrice, 2);
 
             FlowLayoutPanel actions = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false
+                WrapContents = true
             };
             Button btnCalc = ActionButton("Calculate", Teal, 110);
-            Button btnCopy = ActionButton("Copy Price", PrimaryBlue, 120);
-            Button btnReset = ActionButton("Reset", Color.FromArgb(100, 116, 139), 90);
+            Button btnCopy = ActionButton("Copy Selling Price", PrimaryBlue, 150);
+            Button btnReset = ActionButton("Reset", Color.FromArgb(100, 116, 139), 110);
             btnCalc.Click += (_, _) => Recalculate(true);
             btnCopy.Click += (_, _) => CopyFinalPrice();
             btnReset.Click += (_, _) => ResetInputs();
             actions.Controls.Add(btnCalc);
             actions.Controls.Add(btnCopy);
             actions.Controls.Add(btnReset);
-            form.Controls.Add(actions, 0, 5);
+            form.Controls.Add(actions, 0, 9);
             form.SetColumnSpan(actions, 2);
 
             Label settingsHint = new Label
@@ -189,16 +256,17 @@ namespace BubbyPlanetShowroom
                 ForeColor = Muted,
                 TextAlign = ContentAlignment.TopLeft
             };
-            form.Controls.Add(settingsHint, 0, 6);
+            form.Controls.Add(settingsHint, 0, 10);
             form.SetColumnSpan(settingsHint, 2);
 
-            inputCard.Controls.Add(form);
+            inputScroll.Controls.Add(form);
+            inputCard.Controls.Add(inputScroll);
             inputCard.Controls.Add(inputHeader);
 
             Panel resultCard = CreateCard();
             resultCard.Padding = new Padding(1);
             resultCard.Margin = new Padding(0);
-            Panel resultHeader = CreateSectionHeader("RESULT", "Marked price after discount absorption + ₹9 ending");
+            Panel resultHeader = CreateSectionHeader("FULL CALCULATION", "Purchase + profit + rent + salary  ·  round up to ending 9");
 
             TableLayoutPanel resultBody = new TableLayoutPanel
             {
@@ -208,50 +276,33 @@ namespace BubbyPlanetShowroom
                 BackColor = Color.White,
                 Padding = new Padding(12)
             };
-            resultBody.RowStyles.Add(new RowStyle(SizeType.Absolute, 92f));
+            resultBody.RowStyles.Add(new RowStyle(SizeType.Absolute, 108f));
             resultBody.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             TableLayoutPanel summary = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 3,
+                ColumnCount = 2,
                 RowCount = 1
             };
-            summary.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34f));
-            summary.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33f));
-            summary.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33f));
+            summary.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55f));
+            summary.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45f));
 
-            lblFinalPrice = new Label { Text = "₹0" };
-            lblCustomerPays = new Label { Text = "₹0.00" };
+            lblFinalPrice = new Label { Text = "₹—" };
             lblActualProfit = new Label { Text = "₹0.00" };
-            summary.Controls.Add(CreateStatCard("MARKED PRICE", lblFinalPrice, Color.FromArgb(254, 243, 199), Gold), 0, 0);
-            summary.Controls.Add(CreateStatCard("CUSTOMER PAYS (after discount)", lblCustomerPays, Color.FromArgb(167, 243, 208), Teal), 1, 0);
-            summary.Controls.Add(CreateStatCard("ACTUAL PROFIT / PIECE", lblActualProfit, Color.FromArgb(186, 230, 253), Sky), 2, 0);
+            summary.Controls.Add(CreateStatCard("SELLING PRICE", lblFinalPrice, Color.FromArgb(254, 243, 199), Gold), 0, 0);
+            summary.Controls.Add(CreateStatCard("ACTUAL PROFIT / PIECE", lblActualProfit, Color.FromArgb(186, 230, 253), Sky), 1, 0);
 
-            breakdownGrid = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 2,
-                AutoScroll = true,
-                Padding = new Padding(8, 8, 8, 8),
-                BackColor = Color.FromArgb(248, 250, 252)
-            };
-            breakdownGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55f));
-            breakdownGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45f));
+            dgvBreakdown = CreateBreakdownGrid();
 
             resultBody.Controls.Add(summary, 0, 0);
-            resultBody.Controls.Add(breakdownGrid, 0, 1);
+            resultBody.Controls.Add(dgvBreakdown, 0, 1);
 
             resultCard.Controls.Add(resultBody);
             resultCard.Controls.Add(resultHeader);
 
             split.Controls.Add(inputCard, 0, 0);
             split.Controls.Add(resultCard, 1, 0);
-
-            nudPurchase.ValueChanged += (_, _) => Recalculate(false);
-            nudQty.ValueChanged += (_, _) => Recalculate(false);
-            nudTransport.ValueChanged += (_, _) => Recalculate(false);
-            nudParcelQty.ValueChanged += (_, _) => Recalculate(false);
 
             return split;
         }
@@ -295,28 +346,25 @@ namespace BubbyPlanetShowroom
             nudSalary = MoneyBox(30000m, 99999999.99m);
             nudExpectedSales = MoneyBox(3000m, 99999999.99m);
             nudExpectedSales.DecimalPlaces = 0;
-            nudDiscount = MoneyBox(15m, 99.99m);
-            nudDiscount.Maximum = 99.99m;
             nudEnding = IntBox(9, 9);
             nudEnding.Minimum = 0;
             nudEnding.Maximum = 9;
 
             AddLabeled(fields, 0, 0, "Monthly Rent (₹)", nudRent);
             AddLabeled(fields, 2, 0, "Monthly Salary (₹)", nudSalary);
-            AddLabeled(fields, 0, 1, "Expected Monthly Sales (pcs)", nudExpectedSales);
-            AddLabeled(fields, 2, 1, "Customer Discount %", nudDiscount);
-            AddLabeled(fields, 0, 2, "Price Ending Digit", nudEnding);
+            AddLabeled(fields, 0, 1, "Monthly items sold (pcs)", nudExpectedSales);
+            AddLabeled(fields, 2, 1, "Price Ending Digit", nudEnding);
 
             Label slabHint = new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "Profit % applies only to purchase cost / piece. Min is inclusive, Max is exclusive (leave Max blank for no upper limit).",
+                Text = "Profit % applies only to purchase / piece. Min inclusive, Max exclusive (blank Max = no limit).",
                 Font = new Font("Segoe UI", 8.5f),
                 ForeColor = Muted,
                 TextAlign = ContentAlignment.MiddleLeft
             };
-            fields.Controls.Add(slabHint, 2, 2);
-            fields.SetColumnSpan(slabHint, 2);
+            fields.Controls.Add(slabHint, 0, 2);
+            fields.SetColumnSpan(slabHint, 4);
 
             dgvSlabs = new DataGridView
             {
@@ -373,7 +421,6 @@ namespace BubbyPlanetShowroom
             nudRent.Enabled = enabled;
             nudSalary.Enabled = enabled;
             nudExpectedSales.Enabled = enabled;
-            nudDiscount.Enabled = enabled;
             nudEnding.Enabled = enabled;
             dgvSlabs.ReadOnly = !enabled;
             dgvSlabs.AllowUserToAddRows = enabled;
@@ -417,8 +464,11 @@ namespace BubbyPlanetShowroom
                 SetNud(nudRent, settings.MonthlyRent);
                 SetNud(nudSalary, settings.MonthlySalary);
                 SetNud(nudExpectedSales, settings.ExpectedMonthlySales);
-                SetNud(nudDiscount, settings.DiscountPercent);
                 SetNud(nudEnding, settings.PriceEndingDigit);
+                SetText(txtRent, settings.MonthlyRent);
+                SetText(txtSalary, settings.MonthlySalary);
+                SetText(txtExpectedSales, settings.ExpectedMonthlySales, asInteger: true);
+                SetText(txtEnding, settings.PriceEndingDigit, asInteger: true);
                 BindSlabs(settings.Slabs);
                 UpdateSettingsHint();
             }
@@ -447,12 +497,13 @@ namespace BubbyPlanetShowroom
             Control? hint = Controls.Find("lblSettingsHint", true).Length > 0
                 ? Controls.Find("lblSettingsHint", true)[0]
                 : null;
-            if (hint is Label lbl)
-            {
-                decimal rentEach = settings.ExpectedMonthlySales > 0 ? settings.MonthlyRent / settings.ExpectedMonthlySales : 0;
-                decimal salaryEach = settings.ExpectedMonthlySales > 0 ? settings.MonthlySalary / settings.ExpectedMonthlySales : 0;
-                lbl.Text = $"Current settings: rent ₹{rentEach:0.##}/pc  ·  salary ₹{salaryEach:0.##}/pc  ·  discount {settings.DiscountPercent:0.##}%  ·  ending {settings.PriceEndingDigit}";
-            }
+            if (hint is not Label lbl)
+                return;
+
+            PricingSettings working = GetWorkingSettings();
+            decimal rentEach = working.ExpectedMonthlySales > 0 ? working.MonthlyRent / working.ExpectedMonthlySales : 0;
+            decimal salaryEach = working.ExpectedMonthlySales > 0 ? working.MonthlySalary / working.ExpectedMonthlySales : 0;
+            lbl.Text = $"Per piece: rent ₹{rentEach:0.##}  ·  salary ₹{salaryEach:0.##}  ·  ending {working.PriceEndingDigit}";
         }
 
         private void SaveSettings()
@@ -482,7 +533,7 @@ namespace BubbyPlanetShowroom
                 return;
 
             if (MessageBox.Show(
-                    "Restore default rent, salary, sales, discount, ending digit and profit slabs?",
+                    "Restore default rent, salary, sales, ending digit and profit slabs?",
                     "Restore Defaults",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Question) != DialogResult.Yes)
@@ -552,11 +603,13 @@ namespace BubbyPlanetShowroom
 
             return new PricingSettings
             {
-                MonthlyRent = nudRent.Value,
-                MonthlySalary = nudSalary.Value,
-                ExpectedMonthlySales = nudExpectedSales.Value,
-                DiscountPercent = nudDiscount.Value,
-                PriceEndingDigit = (int)nudEnding.Value,
+                MonthlyRent = ReadMoney(txtRent, settings.MonthlyRent),
+                MonthlySalary = ReadMoney(txtSalary, settings.MonthlySalary),
+                ExpectedMonthlySales = ReadMoney(txtExpectedSales, settings.ExpectedMonthlySales),
+                DiscountPercent = 0m,
+                PriceEndingDigit = ReadEndingDigit(),
+                TotalTransportCost = 0m,
+                TotalParcelQuantity = 1,
                 Slabs = slabs
             };
         }
@@ -566,74 +619,225 @@ namespace BubbyPlanetShowroom
             if (suppressCalc)
                 return;
 
+            if (!TryGetItemInputs(out decimal itemPrice, out int quantity))
+            {
+                if (showError)
+                    MessageBox.Show("Enter item price and a quantity of at least 1.", "Selling Price", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             try
             {
+                PricingSettings working = GetWorkingSettings();
                 SellingPriceResult result = SellingPriceCalculations.Calculate(
-                    nudPurchase.Value,
-                    (int)nudQty.Value,
-                    nudTransport.Value,
-                    (int)nudParcelQty.Value,
-                    settings);
+                    itemPrice,
+                    quantity,
+                    working);
 
-                lblFinalPrice.Text = "₹" + result.FinalSellingPrice.ToString("0");
-                lblCustomerPays.Text = "₹" + result.CustomerPayable.ToString("0.00");
+                string selling = "₹" + result.FinalSellingPrice.ToString("0");
+                lblFinalPrice.Text = selling;
+                if (lblSellingPrice != null)
+                    lblSellingPrice.Text = "SELLING PRICE" + Environment.NewLine + selling;
                 lblActualProfit.Text = "₹" + result.ActualProfit.ToString("0.00");
                 RenderBreakdown(result);
-                lblStatus.Text = showError ? "Calculated." : lblStatus.Text;
+                UpdateSettingsHint();
+                if (showError)
+                    lblStatus.Text = "Selling price: " + selling;
             }
             catch (Exception ex)
             {
-                lblFinalPrice.Text = "₹—";
-                lblCustomerPays.Text = "₹—";
-                lblActualProfit.Text = "₹—";
-                breakdownGrid.Controls.Clear();
                 if (showError)
                     MessageBox.Show(ex.Message, "Selling Price", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
-        private void RenderBreakdown(SellingPriceResult result)
+        private bool TryGetItemInputs(out decimal itemPrice, out int quantity)
         {
-            breakdownGrid.Controls.Clear();
-            breakdownGrid.RowStyles.Clear();
-            breakdownGrid.RowCount = 0;
+            itemPrice = 0;
+            quantity = 0;
 
-            AddBreak("Purchase cost / piece", "₹" + result.PurchaseCostPerPiece.ToString("0.00"));
-            AddBreak($"Profit ({result.ProfitMarginPercent:0.##}% of purchase only)", "₹" + result.ProfitPerPiece.ToString("0.00"));
-            AddBreak("Transport / piece (parcel qty)", "₹" + result.TransportPerPiece.ToString("0.00"));
-            AddBreak("Rent / piece", "₹" + result.RentPerPiece.ToString("0.00"));
-            AddBreak("Salary / piece", "₹" + result.SalaryPerPiece.ToString("0.00"));
-            AddBreak("Required net price", "₹" + result.RequiredNetPrice.ToString("0.00"), true);
-            AddBreak($"÷ {(result.DiscountKeepRatio):0.00}  (absorb {settings.DiscountPercent:0.##}% discount)", "₹" + result.PriceBeforeRounding.ToString("0.00"));
-            AddBreak($"Round up to ending {settings.PriceEndingDigit}", "₹" + result.FinalSellingPrice.ToString("0"), true);
-            AddBreak($"{settings.DiscountPercent:0.##}% discount amount", "₹" + result.DiscountAmount.ToString("0.00"));
-            AddBreak("Customer payable", "₹" + result.CustomerPayable.ToString("0.00"));
-            AddBreak("Actual cost (no profit)", "₹" + result.ActualTotalCost.ToString("0.00"));
-            AddBreak("Actual profit / piece", "₹" + result.ActualProfit.ToString("0.00"), true);
+            if (!TryParseDecimal(txtItemPrice.Text, out itemPrice) || itemPrice < 0m)
+                return false;
+            if (!TryParseInt(txtQty.Text, out quantity) || quantity <= 0)
+                return false;
+
+            return true;
         }
 
-        private void AddBreak(string label, string value, bool emphasize = false)
+        private PricingSettings GetWorkingSettings()
         {
-            int row = breakdownGrid.RowCount++;
-            breakdownGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 28f));
-            Font font = new Font("Segoe UI", 9f, emphasize ? FontStyle.Bold : FontStyle.Regular);
-            Color color = emphasize ? Slate : Color.FromArgb(51, 65, 85);
-            breakdownGrid.Controls.Add(new Label
+            return new PricingSettings
             {
-                Text = label,
-                Dock = DockStyle.Fill,
-                Font = font,
-                ForeColor = color,
-                TextAlign = ContentAlignment.MiddleLeft
-            }, 0, row);
-            breakdownGrid.Controls.Add(new Label
+                MonthlyRent = ReadMoney(txtRent, settings.MonthlyRent),
+                MonthlySalary = ReadMoney(txtSalary, settings.MonthlySalary),
+                ExpectedMonthlySales = ReadMoney(txtExpectedSales, settings.ExpectedMonthlySales),
+                DiscountPercent = 0m,
+                PriceEndingDigit = ReadEndingDigit(),
+                TotalTransportCost = 0m,
+                TotalParcelQuantity = 1,
+                Slabs = settings.Slabs
+            };
+        }
+
+        private int ReadEndingDigit()
+        {
+            if (TryParseInt(txtEnding.Text, out int value) && value >= 0 && value <= 9)
+                return value;
+            return settings.PriceEndingDigit;
+        }
+
+        private decimal ReadMoney(TextBox box, decimal fallback)
+        {
+            return TryParseDecimal(box.Text, out decimal value) && value >= 0m ? value : fallback;
+        }
+
+        private static void SetText(TextBox box, decimal value, bool asInteger = false)
+        {
+            box.Text = asInteger || value == decimal.Truncate(value)
+                ? decimal.Truncate(value).ToString("0", CultureInfo.InvariantCulture)
+                : value.ToString("0.##", CultureInfo.InvariantCulture);
+        }
+
+        private static bool TryParseDecimal(string? text, out decimal value)
+        {
+            text = (text ?? "").Trim().Replace(",", "");
+            return decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out value)
+                || decimal.TryParse(text, NumberStyles.Number, CultureInfo.CurrentCulture, out value);
+        }
+
+        private static bool TryParseInt(string? text, out int value)
+        {
+            text = (text ?? "").Trim().Replace(",", "");
+            return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value)
+                || int.TryParse(text, NumberStyles.Integer, CultureInfo.CurrentCulture, out value);
+        }
+
+        private void RenderBreakdown(SellingPriceResult result)
+        {
+            dgvBreakdown.Rows.Clear();
+
+            AddStep("1. Item price", "", "₹" + result.ItemPrice.ToString("0.00"));
+            AddStep("2. Quantity", "", result.Quantity.ToString(CultureInfo.InvariantCulture));
+            AddStep(
+                "3. Purchase cost / piece",
+                "₹" + result.ItemPrice.ToString("0.00") + " ÷ " + result.Quantity.ToString(CultureInfo.InvariantCulture),
+                "₹" + result.PurchaseCostPerPiece.ToString("0.00"));
+            AddStep(
+                "4. Profit margin (auto)",
+                "only on purchase ₹" + result.PurchaseCostPerPiece.ToString("0.00"),
+                result.ProfitMarginPercent.ToString("0.##") + "%");
+            AddStep(
+                "5. Profit / piece",
+                "₹" + result.PurchaseCostPerPiece.ToString("0.00") + " × " + result.ProfitMarginPercent.ToString("0.##") + "%",
+                "₹" + result.ProfitPerPiece.ToString("0.00"));
+            AddStep(
+                "6. Rent / piece",
+                "₹" + result.MonthlyRent.ToString("0.00") + " ÷ " + result.ExpectedMonthlySales.ToString("0.##"),
+                "₹" + result.RentPerPiece.ToString("0.00"));
+            AddStep(
+                "7. Salary / piece",
+                "₹" + result.MonthlySalary.ToString("0.00") + " ÷ " + result.ExpectedMonthlySales.ToString("0.##"),
+                "₹" + result.SalaryPerPiece.ToString("0.00"));
+            AddStep(
+                "8. Required net price",
+                "₹" + result.PurchaseCostPerPiece.ToString("0.00")
+                    + " + ₹" + result.ProfitPerPiece.ToString("0.00")
+                    + " + ₹" + result.RentPerPiece.ToString("0.00")
+                    + " + ₹" + result.SalaryPerPiece.ToString("0.00"),
+                "₹" + result.RequiredNetPrice.ToString("0.00"),
+                emphasize: true);
+            AddStep(
+                "9. Selling price (final)",
+                "round up to ending " + result.PriceEndingDigit.ToString(CultureInfo.InvariantCulture),
+                "₹" + result.FinalSellingPrice.ToString("0"),
+                emphasize: true);
+            AddStep(
+                "10. Actual cost (no profit)",
+                "₹" + result.PurchaseCostPerPiece.ToString("0.00")
+                    + " + ₹" + result.RentPerPiece.ToString("0.00")
+                    + " + ₹" + result.SalaryPerPiece.ToString("0.00"),
+                "₹" + result.ActualTotalCost.ToString("0.00"));
+            AddStep(
+                "11. Actual profit / piece",
+                "₹" + result.FinalSellingPrice.ToString("0") + " − ₹" + result.ActualTotalCost.ToString("0.00"),
+                "₹" + result.ActualProfit.ToString("0.00"),
+                emphasize: true);
+        }
+
+        private void AddStep(string step, string formula, string amount, bool emphasize = false)
+        {
+            int index = dgvBreakdown.Rows.Add(step, formula, amount);
+            DataGridViewRow row = dgvBreakdown.Rows[index];
+            if (!emphasize)
+                return;
+
+            Font bold = new Font("Segoe UI", 9f, FontStyle.Bold);
+            row.DefaultCellStyle.Font = bold;
+            row.DefaultCellStyle.ForeColor = Slate;
+            row.DefaultCellStyle.BackColor = Color.FromArgb(204, 251, 241);
+            row.Cells["Amount"].Style.ForeColor = Teal;
+        }
+
+        private static DataGridView CreateBreakdownGrid()
+        {
+            DataGridView grid = new DataGridView
             {
-                Text = value,
                 Dock = DockStyle.Fill,
-                Font = font,
-                ForeColor = emphasize ? Teal : color,
-                TextAlign = ContentAlignment.MiddleRight
-            }, 1, row);
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                AllowUserToResizeRows = false,
+                ReadOnly = true,
+                RowHeadersVisible = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                MultiSelect = false,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells,
+                BackgroundColor = Color.White,
+                BorderStyle = BorderStyle.None,
+                GridColor = Color.Gainsboro,
+                CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
+                ColumnHeadersHeight = 32,
+                ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
+                EnableHeadersVisualStyles = false,
+                ScrollBars = ScrollBars.Vertical
+            };
+            grid.ColumnHeadersDefaultCellStyle.BackColor = HeaderBg;
+            grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
+            grid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
+            grid.DefaultCellStyle.Font = new Font("Segoe UI", 9f);
+            grid.DefaultCellStyle.ForeColor = Slate;
+            grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(224, 242, 254);
+            grid.DefaultCellStyle.SelectionForeColor = Slate;
+            grid.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
+            grid.DefaultCellStyle.Padding = new Padding(6, 4, 6, 4);
+            grid.RowTemplate.Height = 30;
+            grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 250, 252);
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Step",
+                HeaderText = "Step",
+                FillWeight = 32
+            });
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Formula",
+                HeaderText = "Working",
+                FillWeight = 46
+            });
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Amount",
+                HeaderText = "Amount",
+                FillWeight = 22,
+                DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    Alignment = DataGridViewContentAlignment.MiddleRight,
+                    Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
+                }
+            });
+
+            return grid;
         }
 
         private void CopyFinalPrice()
@@ -649,13 +853,16 @@ namespace BubbyPlanetShowroom
         private void ResetInputs()
         {
             suppressCalc = true;
-            nudPurchase.Value = 0;
-            nudQty.Value = 1;
-            nudTransport.Value = 0;
-            nudParcelQty.Value = 1;
+            txtItemPrice.Text = "";
+            txtQty.Text = "";
             suppressCalc = false;
-            Recalculate(false);
-            lblStatus.Text = "Inputs cleared.";
+
+            if (lblSellingPrice != null)
+                lblSellingPrice.Text = "SELLING PRICE" + Environment.NewLine + "₹ —";
+            lblFinalPrice.Text = "₹—";
+            lblActualProfit.Text = "₹0.00";
+            dgvBreakdown.Rows.Clear();
+            lblStatus.Text = "Reset. Item price aur quantity dubara daalo — rent/salary same rahenge.";
         }
 
         private static void AddFormRow(TableLayoutPanel form, int row, string label, Control field)
@@ -682,6 +889,95 @@ namespace BubbyPlanetShowroom
                 ForeColor = Slate
             }, col, row);
             grid.Controls.Add(field, col + 1, row);
+        }
+
+        private TextBox NumberBox(bool allowDecimal, string placeholder)
+        {
+            TextBox box = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Font = new Font("Segoe UI", 12f),
+                PlaceholderText = placeholder,
+                MaxLength = allowDecimal ? 14 : 9
+            };
+            box.KeyPress += (_, e) => NumberKeyPress(e, box, allowDecimal);
+            box.KeyDown += NumberKeyDown;
+            box.TextChanged += (_, _) => SanitizeAndCalc(box, allowDecimal);
+            return box;
+        }
+
+        private static void NumberKeyPress(KeyPressEventArgs e, TextBox box, bool allowDecimal)
+        {
+            if (char.IsControl(e.KeyChar))
+                return;
+
+            if (char.IsDigit(e.KeyChar))
+                return;
+
+            if (allowDecimal && (e.KeyChar == '.' || e.KeyChar == ',') && !box.Text.Contains('.') && !box.Text.Contains(','))
+                return;
+
+            e.Handled = true;
+        }
+
+        private static void NumberKeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.Control && e.KeyCode is Keys.A or Keys.C or Keys.X or Keys.V or Keys.Z)
+                return;
+            if (e.KeyCode is Keys.Back or Keys.Delete or Keys.Left or Keys.Right or Keys.Home or Keys.End or Keys.Tab)
+                return;
+        }
+
+        private void SanitizeAndCalc(TextBox box, bool allowDecimal)
+        {
+            if (suppressCalc)
+                return;
+
+            string raw = box.Text ?? "";
+            string cleaned = allowDecimal ? KeepMoneyDigits(raw) : KeepDigitsOnly(raw);
+            if (cleaned != raw)
+            {
+                int caret = box.SelectionStart;
+                int delta = raw.Length - cleaned.Length;
+                suppressCalc = true;
+                box.Text = cleaned;
+                box.SelectionStart = Math.Max(0, Math.Min(cleaned.Length, caret - delta));
+                suppressCalc = false;
+            }
+
+            Recalculate(false);
+        }
+
+        private static string KeepDigitsOnly(string text)
+        {
+            System.Text.StringBuilder sb = new System.Text.StringBuilder(text.Length);
+            foreach (char c in text)
+            {
+                if (char.IsDigit(c))
+                    sb.Append(c);
+            }
+            return sb.ToString();
+        }
+
+        private static string KeepMoneyDigits(string text)
+        {
+            System.Text.StringBuilder sb = new System.Text.StringBuilder(text.Length);
+            bool seenDot = false;
+            foreach (char c in text)
+            {
+                if (char.IsDigit(c))
+                {
+                    sb.Append(c);
+                    continue;
+                }
+
+                if ((c == '.' || c == ',') && !seenDot)
+                {
+                    sb.Append('.');
+                    seenDot = true;
+                }
+            }
+            return sb.ToString();
         }
 
         private static NumericUpDown MoneyBox(decimal value, decimal max)
@@ -762,7 +1058,7 @@ namespace BubbyPlanetShowroom
                 Text = title,
                 Dock = DockStyle.Left,
                 AutoSize = false,
-                Width = 170,
+                Width = 220,
                 Font = new Font("Segoe UI", 9f, FontStyle.Bold),
                 ForeColor = Color.White,
                 TextAlign = ContentAlignment.MiddleLeft
@@ -808,7 +1104,7 @@ namespace BubbyPlanetShowroom
             };
 
             valueLabel.Dock = DockStyle.Fill;
-            valueLabel.Font = new Font("Segoe UI", 16f, FontStyle.Bold);
+            valueLabel.Font = new Font("Segoe UI", 20f, FontStyle.Bold);
             valueLabel.ForeColor = Slate;
             valueLabel.TextAlign = ContentAlignment.MiddleLeft;
             valueLabel.BackColor = Color.Transparent;

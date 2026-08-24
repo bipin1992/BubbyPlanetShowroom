@@ -208,21 +208,40 @@ CREATE TABLE IF NOT EXISTS pricing_settings
     monthly_rent DECIMAL(12,2) NOT NULL DEFAULT 30000.00,
     monthly_salary DECIMAL(12,2) NOT NULL DEFAULT 30000.00,
     expected_monthly_sales DECIMAL(12,2) NOT NULL DEFAULT 3000.00,
-    discount_percent DECIMAL(6,2) NOT NULL DEFAULT 15.00,
+    discount_percent DECIMAL(6,2) NOT NULL DEFAULT 0.00,
     price_ending_digit TINYINT NOT NULL DEFAULT 9,
+    total_transport_cost DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    total_parcel_quantity INT NOT NULL DEFAULT 1,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );";
             using (MySqlCommand cmd = new MySqlCommand(createSettings, conn))
                 cmd.ExecuteNonQuery();
 
+            EnsureColumnExists(conn, "pricing_settings", "total_transport_cost", "DECIMAL(12,2) NOT NULL DEFAULT 0.00");
+            EnsureColumnExists(conn, "pricing_settings", "total_parcel_quantity", "INT NOT NULL DEFAULT 1");
+
             using (MySqlCommand seed = new MySqlCommand(
                 @"INSERT IGNORE INTO pricing_settings
-                    (id, monthly_rent, monthly_salary, expected_monthly_sales, discount_percent, price_ending_digit)
+                    (id, monthly_rent, monthly_salary, expected_monthly_sales, discount_percent, price_ending_digit,
+                     total_transport_cost, total_parcel_quantity)
                   VALUES
-                    (1, 30000.00, 30000.00, 3000.00, 15.00, 9)",
+                    (1, 30000.00, 30000.00, 3000.00, 0.00, 9, 0.00, 1)",
                 conn))
             {
                 seed.ExecuteNonQuery();
+            }
+
+            using (MySqlCommand clearUnused = new MySqlCommand(
+                @"UPDATE pricing_settings
+                  SET discount_percent = 0,
+                      total_transport_cost = 0,
+                      total_parcel_quantity = 1
+                  WHERE discount_percent <> 0
+                     OR total_transport_cost <> 0
+                     OR total_parcel_quantity <> 1",
+                conn))
+            {
+                clearUnused.ExecuteNonQuery();
             }
 
             string createSlabs = @"
@@ -241,20 +260,35 @@ CREATE TABLE IF NOT EXISTS pricing_profit_slabs
             using (MySqlCommand countCmd = new MySqlCommand("SELECT COUNT(*) FROM pricing_profit_slabs", conn))
             {
                 long count = Convert.ToInt64(countCmd.ExecuteScalar() ?? 0);
-                if (count > 0)
+                if (count == 0)
+                {
+                    using MySqlCommand cmd = new MySqlCommand(
+                        @"INSERT INTO pricing_profit_slabs (min_purchase_cost, max_purchase_cost, margin_percent, sort_order)
+                          VALUES
+                            (0,    500,  45, 0),
+                            (500,  1000, 40, 1),
+                            (1000, 1500, 35, 2),
+                            (1500, 2000, 30, 3),
+                            (2000, NULL, 25, 4)",
+                        conn);
+                    cmd.ExecuteNonQuery();
                     return;
+                }
             }
 
-            string seedSlabs = @"
-INSERT INTO pricing_profit_slabs (min_purchase_cost, max_purchase_cost, margin_percent, sort_order)
-VALUES
-    (0,    500,  50, 0),
-    (500,  1000, 45, 1),
-    (1000, 1500, 40, 2),
-    (1500, 2000, 35, 3),
-    (2000, NULL, 30, 4);";
-            using (MySqlCommand cmd = new MySqlCommand(seedSlabs, conn))
-                cmd.ExecuteNonQuery();
+            string[] slabUpdates =
+            {
+                "UPDATE pricing_profit_slabs SET margin_percent = 45 WHERE min_purchase_cost = 0 AND max_purchase_cost = 500",
+                "UPDATE pricing_profit_slabs SET margin_percent = 40 WHERE min_purchase_cost = 500 AND max_purchase_cost = 1000",
+                "UPDATE pricing_profit_slabs SET margin_percent = 35 WHERE min_purchase_cost = 1000 AND max_purchase_cost = 1500",
+                "UPDATE pricing_profit_slabs SET margin_percent = 30 WHERE min_purchase_cost = 1500 AND max_purchase_cost = 2000",
+                "UPDATE pricing_profit_slabs SET margin_percent = 25 WHERE min_purchase_cost = 2000 AND max_purchase_cost IS NULL"
+            };
+            foreach (string sql in slabUpdates)
+            {
+                using MySqlCommand updateSlabs = new MySqlCommand(sql, conn);
+                updateSlabs.ExecuteNonQuery();
+            }
         }
 
     }
