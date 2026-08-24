@@ -288,6 +288,7 @@ namespace BubbyPlanetShowroom
             AddMenuButton("Users");
             AddMenuButton("Revenue");
             AddMenuButton("Discount");
+            AddMenuButton("Selling Price");
             AddMenuButton("Selling");
             AddMenuButton("Closing Balance");
         }
@@ -351,6 +352,7 @@ namespace BubbyPlanetShowroom
                         "Users" => new Users(),
                         "Revenue" => new Revenue(),
                         "Discount" => new DiscountManager(CurrentRole),
+                        "Selling Price" => new SellingPrice(CurrentRole),
                         "Selling" => new Selling(),
                         "Closing Balance" => new ClosingBalance(),
                         _ => null
@@ -475,6 +477,7 @@ namespace BubbyPlanetShowroom
             "Users" => Color.FromArgb(186, 230, 253),
             "Revenue" => Color.FromArgb(190, 242, 100),
             "Discount" => Color.FromArgb(253, 186, 116),
+            "Selling Price" => Color.FromArgb(253, 224, 71),
             "Selling" => Color.FromArgb(147, 197, 253),
             "Closing Balance" => Color.FromArgb(251, 113, 133),
             _ => Color.FromArgb(148, 163, 184)
@@ -571,6 +574,24 @@ namespace BubbyPlanetShowroom
                         g, "%",
                         new Font("Segoe UI", 10f, FontStyle.Bold),
                         chip, color,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                    break;
+
+                case "Selling Price": // tag + 9
+                    Point[] priceTag =
+                    {
+                        new Point(cx - s, cy),
+                        new Point(cx - 2, cy - s),
+                        new Point(cx + s, cy - s),
+                        new Point(cx + s, cy + s),
+                        new Point(cx - 2, cy + s)
+                    };
+                    g.DrawPolygon(pen, priceTag);
+                    TextRenderer.DrawText(
+                        g, "9",
+                        new Font("Segoe UI", 7f, FontStyle.Bold),
+                        new Rectangle(chip.X + 2, chip.Y + 2, chip.Width - 2, chip.Height - 2),
+                        color,
                         TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
                     break;
 
@@ -707,7 +728,7 @@ namespace BubbyPlanetShowroom
                 else if (role == "Master Admin")
                     show = true;
                 else if (role == "Admin")
-                    show = key is "Add Item" or "Master" or "IN" or "Stock" or "Label" or "Receipt" or "Return" or "Closing Balance";
+                    show = key is "Add Item" or "Master" or "IN" or "Stock" or "Label" or "Receipt" or "Return" or "Selling Price" or "Closing Balance";
                 else if (role == "Cashier")
                     show = key is "Receipt" or "Return" or "IN" or "Stock" or "Label" or "Closing Balance";
 
