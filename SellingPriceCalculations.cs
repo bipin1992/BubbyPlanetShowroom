@@ -78,7 +78,7 @@ namespace BubbyPlanetShowroom
     /// <summary>
     /// Pure selling-price math. UI-free so unit tests can lock the business examples.
     /// Profit margin is applied only to purchase cost per piece — never to
-    /// rent or salary.
+    /// transport, rent, or salary.
     /// </summary>
     public static class SellingPriceCalculations
     {
@@ -123,25 +123,30 @@ namespace BubbyPlanetShowroom
         }
 
         /// <summary>
-        /// Calculator entry point: item price + quantity.
+        /// Calculator: per-piece purchase rate + this item's quantity + this item's transport.
+        /// Transport / piece = item transport ÷ quantity. Purchase is not divided by quantity.
         /// </summary>
         public static SellingPriceResult Calculate(
-            decimal itemPrice,
+            decimal perPieceRate,
             int quantity,
-            PricingSettings settings)
+            PricingSettings settings,
+            decimal itemTransportCost = 0m)
         {
             if (settings == null)
                 throw new ArgumentNullException(nameof(settings));
-            if (itemPrice < 0m)
-                throw new ArgumentOutOfRangeException(nameof(itemPrice), "Purchase cost cannot be negative.");
+            if (perPieceRate < 0m)
+                throw new ArgumentOutOfRangeException(nameof(perPieceRate), "Per piece rate cannot be negative.");
             if (quantity <= 0)
                 throw new ArgumentOutOfRangeException(nameof(quantity), "Quantity must be at least 1.");
+            if (itemTransportCost < 0m)
+                throw new ArgumentOutOfRangeException(nameof(itemTransportCost), "Transport cost cannot be negative.");
             if (settings.ExpectedMonthlySales <= 0m)
                 throw new InvalidOperationException("Expected monthly sales must be greater than 0.");
             if (settings.MonthlyRent < 0m || settings.MonthlySalary < 0m)
                 throw new InvalidOperationException("Monthly rent and salary cannot be negative.");
 
-            decimal purchasePerPiece = itemPrice / quantity;
+            decimal purchasePerPiece = perPieceRate;
+            decimal transportPerPiece = itemTransportCost / quantity;
             decimal rentPerPiece = settings.MonthlyRent / settings.ExpectedMonthlySales;
             decimal salaryPerPiece = settings.MonthlySalary / settings.ExpectedMonthlySales;
 
@@ -151,27 +156,28 @@ namespace BubbyPlanetShowroom
             decimal requiredNet =
                 purchasePerPiece
                 + profitPerPiece
+                + transportPerPiece
                 + rentPerPiece
                 + salaryPerPiece;
 
             decimal priceBeforeRounding = requiredNet;
             decimal finalPrice = RoundUpToEndingDigit(priceBeforeRounding, settings.PriceEndingDigit);
-            decimal actualTotalCost = purchasePerPiece + rentPerPiece + salaryPerPiece;
+            decimal actualTotalCost = purchasePerPiece + transportPerPiece + rentPerPiece + salaryPerPiece;
             decimal actualProfit = finalPrice - actualTotalCost;
 
             return new SellingPriceResult
             {
-                ItemPrice = Round2(itemPrice),
+                ItemPrice = Round2(perPieceRate),
                 Quantity = quantity,
-                TotalTransportCost = 0m,
-                TotalParcelQuantity = 1,
+                TotalTransportCost = Round2(itemTransportCost),
+                TotalParcelQuantity = quantity,
                 MonthlyRent = Round2(settings.MonthlyRent),
                 MonthlySalary = Round2(settings.MonthlySalary),
                 ExpectedMonthlySales = settings.ExpectedMonthlySales,
                 DiscountPercent = 0m,
                 PriceEndingDigit = settings.PriceEndingDigit,
                 PurchaseCostPerPiece = Round2(purchasePerPiece),
-                TransportPerPiece = 0m,
+                TransportPerPiece = Round2(transportPerPiece),
                 RentPerPiece = Round2(rentPerPiece),
                 SalaryPerPiece = Round2(salaryPerPiece),
                 ProfitMarginPercent = marginPercent,

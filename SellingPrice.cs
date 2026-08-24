@@ -23,8 +23,9 @@ namespace BubbyPlanetShowroom
         private PricingSettings settings = PricingSettings.CreateDefaults();
         private bool suppressCalc;
 
-        private TextBox txtItemPrice;
+        private TextBox txtTransport;
         private TextBox txtQty;
+        private TextBox txtItemPrice;
         private TextBox txtRent;
         private TextBox txtSalary;
         private TextBox txtExpectedSales;
@@ -102,7 +103,7 @@ namespace BubbyPlanetShowroom
                     new Rectangle(16, 10, 480, 28), Color.White,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
                 using Font hintFont = new Font("Segoe UI", 8.5f);
-                TextRenderer.DrawText(e.Graphics, "Item + qty ke saath rent aur salary yahin change ho sakte hain  ·  selling price turant dikhega", hintFont,
+                TextRenderer.DrawText(e.Graphics, "Is item ka transport, quantity aur per piece rate daalo  ·  selling price turant dikhega", hintFont,
                     new Rectangle(16, 38, 720, 20), Color.FromArgb(204, 251, 241),
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
             };
@@ -151,7 +152,7 @@ namespace BubbyPlanetShowroom
             Panel inputCard = CreateCard();
             inputCard.Padding = new Padding(1);
             inputCard.Margin = new Padding(0, 0, 10, 0);
-            Panel inputHeader = CreateSectionHeader("INPUTS", "Defaults loaded — rent/salary later bhi change kar sakte ho");
+            Panel inputHeader = CreateSectionHeader("INPUTS", "Is item ka transport total, kitne pieces, aur per piece cost rate");
             Panel inputScroll = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -163,19 +164,20 @@ namespace BubbyPlanetShowroom
             {
                 Dock = DockStyle.Top,
                 AutoSize = false,
-                Height = 500,
+                Height = 540,
                 ColumnCount = 2,
-                RowCount = 11,
+                RowCount = 12,
                 Padding = new Padding(4),
                 BackColor = Color.White
             };
             form.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 48f));
             form.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 52f));
-            for (int i = 0; i < 11; i++)
-                form.RowStyles.Add(new RowStyle(SizeType.Absolute, i is 2 or 7 ? 28f : (i == 8 ? 78f : 36f)));
+            for (int i = 0; i < 12; i++)
+                form.RowStyles.Add(new RowStyle(SizeType.Absolute, i is 3 or 8 ? 28f : (i == 9 ? 78f : 36f)));
 
-            txtItemPrice = NumberBox(allowDecimal: true, placeholder: "e.g. 500");
+            txtTransport = NumberBox(allowDecimal: true, placeholder: "e.g. 100");
             txtQty = NumberBox(allowDecimal: false, placeholder: "e.g. 10");
+            txtItemPrice = NumberBox(allowDecimal: true, placeholder: "e.g. 50");
             txtRent = NumberBox(allowDecimal: true, placeholder: "30000");
             txtSalary = NumberBox(allowDecimal: true, placeholder: "30000");
             txtExpectedSales = NumberBox(allowDecimal: false, placeholder: "3000");
@@ -188,8 +190,9 @@ namespace BubbyPlanetShowroom
             txtEnding.Text = "9";
             suppressCalc = false;
 
-            AddFormRow(form, 0, "Item Price (₹)", txtItemPrice);
-            AddFormRow(form, 1, "Quantity", txtQty);
+            AddFormRow(form, 0, "Transport Cost (this item ₹)", txtTransport);
+            AddFormRow(form, 1, "Quantity (this item)", txtQty);
+            AddFormRow(form, 2, "Per Piece Rate (₹)", txtItemPrice);
 
             Label overheadTitle = new Label
             {
@@ -199,23 +202,23 @@ namespace BubbyPlanetShowroom
                 ForeColor = Teal,
                 TextAlign = ContentAlignment.BottomLeft
             };
-            form.Controls.Add(overheadTitle, 0, 2);
+            form.Controls.Add(overheadTitle, 0, 3);
             form.SetColumnSpan(overheadTitle, 2);
 
-            AddFormRow(form, 3, "Monthly Rent (₹)", txtRent);
-            AddFormRow(form, 4, "Monthly Salary (₹)", txtSalary);
-            AddFormRow(form, 5, "Monthly items sold (pcs)", txtExpectedSales);
-            AddFormRow(form, 6, "Price Ending Digit", txtEnding);
+            AddFormRow(form, 4, "Monthly Rent (₹)", txtRent);
+            AddFormRow(form, 5, "Monthly Salary (₹)", txtSalary);
+            AddFormRow(form, 6, "Monthly items sold (pcs)", txtExpectedSales);
+            AddFormRow(form, 7, "Price Ending Digit", txtEnding);
 
             Label hint = new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "Rent, salary aur monthly sold quantity default se bhari hain. Future mein yahin change karo.",
+                Text = "Transport / piece = transport ÷ quantity. Per piece rate = cost price, divide nahi hota.",
                 Font = new Font("Segoe UI", 8.5f),
                 ForeColor = Muted,
                 TextAlign = ContentAlignment.TopLeft
             };
-            form.Controls.Add(hint, 0, 7);
+            form.Controls.Add(hint, 0, 8);
             form.SetColumnSpan(hint, 2);
 
             lblSellingPrice = new Label
@@ -227,7 +230,7 @@ namespace BubbyPlanetShowroom
                 BackColor = Color.FromArgb(254, 243, 199),
                 TextAlign = ContentAlignment.MiddleCenter
             };
-            form.Controls.Add(lblSellingPrice, 0, 8);
+            form.Controls.Add(lblSellingPrice, 0, 9);
             form.SetColumnSpan(lblSellingPrice, 2);
 
             FlowLayoutPanel actions = new FlowLayoutPanel
@@ -245,7 +248,7 @@ namespace BubbyPlanetShowroom
             actions.Controls.Add(btnCalc);
             actions.Controls.Add(btnCopy);
             actions.Controls.Add(btnReset);
-            form.Controls.Add(actions, 0, 9);
+            form.Controls.Add(actions, 0, 10);
             form.SetColumnSpan(actions, 2);
 
             Label settingsHint = new Label
@@ -256,7 +259,7 @@ namespace BubbyPlanetShowroom
                 ForeColor = Muted,
                 TextAlign = ContentAlignment.TopLeft
             };
-            form.Controls.Add(settingsHint, 0, 10);
+            form.Controls.Add(settingsHint, 0, 11);
             form.SetColumnSpan(settingsHint, 2);
 
             inputScroll.Controls.Add(form);
@@ -266,7 +269,7 @@ namespace BubbyPlanetShowroom
             Panel resultCard = CreateCard();
             resultCard.Padding = new Padding(1);
             resultCard.Margin = new Padding(0);
-            Panel resultHeader = CreateSectionHeader("FULL CALCULATION", "Purchase + profit + rent + salary  ·  round up to ending 9");
+            Panel resultHeader = CreateSectionHeader("FULL CALCULATION", "Per piece rate + profit + transport/piece + rent + salary  ·  round up to ending 9");
 
             TableLayoutPanel resultBody = new TableLayoutPanel
             {
@@ -503,7 +506,10 @@ namespace BubbyPlanetShowroom
             PricingSettings working = GetWorkingSettings();
             decimal rentEach = working.ExpectedMonthlySales > 0 ? working.MonthlyRent / working.ExpectedMonthlySales : 0;
             decimal salaryEach = working.ExpectedMonthlySales > 0 ? working.MonthlySalary / working.ExpectedMonthlySales : 0;
-            lbl.Text = $"Per piece: rent ₹{rentEach:0.##}  ·  salary ₹{salaryEach:0.##}  ·  ending {working.PriceEndingDigit}";
+            decimal transport = ReadMoney(txtTransport, 0m);
+            int qty = TryParseInt(txtQty.Text, out int parsedQty) && parsedQty > 0 ? parsedQty : 0;
+            decimal transportEach = qty > 0 ? transport / qty : 0;
+            lbl.Text = $"Per piece: transport ₹{transportEach:0.##}  ·  rent ₹{rentEach:0.##}  ·  salary ₹{salaryEach:0.##}  ·  ending {working.PriceEndingDigit}";
         }
 
         private void SaveSettings()
@@ -619,10 +625,10 @@ namespace BubbyPlanetShowroom
             if (suppressCalc)
                 return;
 
-            if (!TryGetItemInputs(out decimal itemPrice, out int quantity))
+            if (!TryGetItemInputs(out decimal perPieceRate, out int quantity, out decimal itemTransportCost))
             {
                 if (showError)
-                    MessageBox.Show("Enter item price and a quantity of at least 1.", "Selling Price", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show("Enter this item's transport (0 allowed), quantity, and per piece rate.", "Selling Price", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -630,9 +636,10 @@ namespace BubbyPlanetShowroom
             {
                 PricingSettings working = GetWorkingSettings();
                 SellingPriceResult result = SellingPriceCalculations.Calculate(
-                    itemPrice,
+                    perPieceRate,
                     quantity,
-                    working);
+                    working,
+                    itemTransportCost);
 
                 string selling = "₹" + result.FinalSellingPrice.ToString("0");
                 lblFinalPrice.Text = selling;
@@ -651,14 +658,21 @@ namespace BubbyPlanetShowroom
             }
         }
 
-        private bool TryGetItemInputs(out decimal itemPrice, out int quantity)
+        private bool TryGetItemInputs(out decimal perPieceRate, out int quantity, out decimal itemTransportCost)
         {
-            itemPrice = 0;
+            perPieceRate = 0;
             quantity = 0;
+            itemTransportCost = 0;
 
-            if (!TryParseDecimal(txtItemPrice.Text, out itemPrice) || itemPrice < 0m)
+            string transportText = (txtTransport.Text ?? "").Trim();
+            if (string.IsNullOrEmpty(transportText))
+                itemTransportCost = 0m;
+            else if (!TryParseDecimal(transportText, out itemTransportCost) || itemTransportCost < 0m)
                 return false;
+
             if (!TryParseInt(txtQty.Text, out quantity) || quantity <= 0)
+                return false;
+            if (!TryParseDecimal(txtItemPrice.Text, out perPieceRate) || perPieceRate < 0m)
                 return false;
 
             return true;
@@ -716,49 +730,55 @@ namespace BubbyPlanetShowroom
         {
             dgvBreakdown.Rows.Clear();
 
-            AddStep("1. Item price", "", "₹" + result.ItemPrice.ToString("0.00"));
+            AddStep("1. Transport cost (this item)", "", "₹" + result.TotalTransportCost.ToString("0.00"));
             AddStep("2. Quantity", "", result.Quantity.ToString(CultureInfo.InvariantCulture));
             AddStep(
-                "3. Purchase cost / piece",
-                "₹" + result.ItemPrice.ToString("0.00") + " ÷ " + result.Quantity.ToString(CultureInfo.InvariantCulture),
+                "3. Transport / piece",
+                "₹" + result.TotalTransportCost.ToString("0.00") + " ÷ " + result.Quantity.ToString(CultureInfo.InvariantCulture),
+                "₹" + result.TransportPerPiece.ToString("0.00"));
+            AddStep(
+                "4. Per piece rate (cost)",
+                "",
                 "₹" + result.PurchaseCostPerPiece.ToString("0.00"));
             AddStep(
-                "4. Profit margin (auto)",
-                "only on purchase ₹" + result.PurchaseCostPerPiece.ToString("0.00"),
+                "5. Profit margin (auto)",
+                "only on cost ₹" + result.PurchaseCostPerPiece.ToString("0.00"),
                 result.ProfitMarginPercent.ToString("0.##") + "%");
             AddStep(
-                "5. Profit / piece",
+                "6. Profit / piece",
                 "₹" + result.PurchaseCostPerPiece.ToString("0.00") + " × " + result.ProfitMarginPercent.ToString("0.##") + "%",
                 "₹" + result.ProfitPerPiece.ToString("0.00"));
             AddStep(
-                "6. Rent / piece",
+                "7. Rent / piece",
                 "₹" + result.MonthlyRent.ToString("0.00") + " ÷ " + result.ExpectedMonthlySales.ToString("0.##"),
                 "₹" + result.RentPerPiece.ToString("0.00"));
             AddStep(
-                "7. Salary / piece",
+                "8. Salary / piece",
                 "₹" + result.MonthlySalary.ToString("0.00") + " ÷ " + result.ExpectedMonthlySales.ToString("0.##"),
                 "₹" + result.SalaryPerPiece.ToString("0.00"));
             AddStep(
-                "8. Required net price",
+                "9. Required net price",
                 "₹" + result.PurchaseCostPerPiece.ToString("0.00")
                     + " + ₹" + result.ProfitPerPiece.ToString("0.00")
+                    + " + ₹" + result.TransportPerPiece.ToString("0.00")
                     + " + ₹" + result.RentPerPiece.ToString("0.00")
                     + " + ₹" + result.SalaryPerPiece.ToString("0.00"),
                 "₹" + result.RequiredNetPrice.ToString("0.00"),
                 emphasize: true);
             AddStep(
-                "9. Selling price (final)",
+                "10. Selling price (final)",
                 "round up to ending " + result.PriceEndingDigit.ToString(CultureInfo.InvariantCulture),
                 "₹" + result.FinalSellingPrice.ToString("0"),
                 emphasize: true);
             AddStep(
-                "10. Actual cost (no profit)",
+                "11. Actual cost (no profit)",
                 "₹" + result.PurchaseCostPerPiece.ToString("0.00")
+                    + " + ₹" + result.TransportPerPiece.ToString("0.00")
                     + " + ₹" + result.RentPerPiece.ToString("0.00")
                     + " + ₹" + result.SalaryPerPiece.ToString("0.00"),
                 "₹" + result.ActualTotalCost.ToString("0.00"));
             AddStep(
-                "11. Actual profit / piece",
+                "12. Actual profit / piece",
                 "₹" + result.FinalSellingPrice.ToString("0") + " − ₹" + result.ActualTotalCost.ToString("0.00"),
                 "₹" + result.ActualProfit.ToString("0.00"),
                 emphasize: true);
@@ -853,8 +873,9 @@ namespace BubbyPlanetShowroom
         private void ResetInputs()
         {
             suppressCalc = true;
-            txtItemPrice.Text = "";
+            txtTransport.Text = "";
             txtQty.Text = "";
+            txtItemPrice.Text = "";
             suppressCalc = false;
 
             if (lblSellingPrice != null)
@@ -862,7 +883,7 @@ namespace BubbyPlanetShowroom
             lblFinalPrice.Text = "₹—";
             lblActualProfit.Text = "₹0.00";
             dgvBreakdown.Rows.Clear();
-            lblStatus.Text = "Reset. Item price aur quantity dubara daalo — rent/salary same rahenge.";
+            lblStatus.Text = "Reset. Is item ka transport, quantity aur per piece rate dubara daalo.";
         }
 
         private static void AddFormRow(TableLayoutPanel form, int row, string label, Control field)

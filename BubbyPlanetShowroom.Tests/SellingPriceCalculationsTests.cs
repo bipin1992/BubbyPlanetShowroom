@@ -58,13 +58,13 @@ namespace BubbyPlanetShowroom.Tests
             Assert.Equal(expectedMargin, margin);
         }
 
-        // ---------- Complete example: quantity 1 ----------
+        // ---------- Per piece rate is not divided by quantity ----------
 
         [Fact]
-        public void Calculate_Quantity1_PlanExample()
+        public void Calculate_PerPieceRate_NotDividedByQuantity()
         {
             SellingPriceResult result = SellingPriceCalculations.Calculate(
-                itemPrice: 500m,
+                perPieceRate: 500m,
                 quantity: 1,
                 settings: ExampleSettings());
 
@@ -83,57 +83,52 @@ namespace BubbyPlanetShowroom.Tests
             Assert.Equal(209.00m, result.ActualProfit);
         }
 
-        // ---------- Complete example: quantity 10 ----------
-
         [Fact]
-        public void Calculate_Quantity10_PlanExample()
+        public void Calculate_ItemTransportSplitByQuantity()
         {
+            // Transport ₹100 for this item, 10 pieces, cost rate ₹50 / piece.
             SellingPriceResult result = SellingPriceCalculations.Calculate(
-                itemPrice: 100m,
+                perPieceRate: 50m,
                 quantity: 10,
-                settings: ExampleSettings());
+                settings: ExampleSettings(),
+                itemTransportCost: 100m);
 
-            Assert.Equal(10.00m, result.PurchaseCostPerPiece);
+            Assert.Equal(50.00m, result.PurchaseCostPerPiece);
             Assert.Equal(45m, result.ProfitMarginPercent);
-            Assert.Equal(4.50m, result.ProfitPerPiece);
-            Assert.Equal(0m, result.TransportPerPiece);
+            Assert.Equal(22.50m, result.ProfitPerPiece);
+            Assert.Equal(100.00m, result.TotalTransportCost);
+            Assert.Equal(10.00m, result.TransportPerPiece);
             Assert.Equal(10.00m, result.RentPerPiece);
             Assert.Equal(10.00m, result.SalaryPerPiece);
-            Assert.Equal(34.50m, result.RequiredNetPrice);
-            Assert.Equal(34.50m, result.PriceBeforeRounding);
-            Assert.Equal(39m, result.FinalSellingPrice);
-            Assert.Equal(0m, result.DiscountAmount);
-            Assert.Equal(39m, result.CustomerPayable);
-            Assert.Equal(30.00m, result.ActualTotalCost);
-            Assert.Equal(9.00m, result.ActualProfit);
-            Assert.Equal(100.00m, result.ItemPrice);
-            Assert.Equal(10, result.Quantity);
-            Assert.Equal(0m, result.DiscountPercent);
-            Assert.Equal(9, result.PriceEndingDigit);
+            Assert.Equal(102.50m, result.RequiredNetPrice);
+            Assert.Equal(109m, result.FinalSellingPrice);
+            Assert.Equal(80.00m, result.ActualTotalCost);
+            Assert.Equal(29.00m, result.ActualProfit);
         }
 
         [Fact]
-        public void Calculate_IgnoresTransportInSettings()
+        public void Calculate_IgnoresTransportInSettings_UsesItemTransport()
         {
             PricingSettings settings = ExampleSettings();
             settings.TotalTransportCost = 3000m;
             settings.TotalParcelQuantity = 30;
 
             SellingPriceResult result = SellingPriceCalculations.Calculate(
-                itemPrice: 100m,
-                quantity: 6,
-                settings: settings);
+                perPieceRate: 100m,
+                quantity: 10,
+                settings: settings,
+                itemTransportCost: 50m);
 
-            Assert.Equal(16.67m, result.PurchaseCostPerPiece);
-            Assert.Equal(0m, result.TransportPerPiece);
-            Assert.Equal(0m, result.TotalTransportCost);
+            Assert.Equal(100.00m, result.PurchaseCostPerPiece);
+            Assert.Equal(5.00m, result.TransportPerPiece);
+            Assert.Equal(50.00m, result.TotalTransportCost);
         }
 
         [Fact]
         public void Calculate_ProfitAppliesOnlyToPurchaseCost()
         {
             SellingPriceResult result = SellingPriceCalculations.Calculate(
-                itemPrice: 100m,
+                perPieceRate: 100m,
                 quantity: 1,
                 settings: ExampleSettings());
 
