@@ -149,6 +149,7 @@ CREATE TABLE IF NOT EXISTS daily_cash_closing
 
             EnsureColumnExists(conn, "daily_cash_closing", "cash_in_reason", "VARCHAR(300) NULL");
             EnsureColumnExists(conn, "daily_cash_closing", "cash_out_reason", "VARCHAR(300) NULL");
+            EnsureColumnExists(conn, "daily_cash_closing", "is_shop_closed", "TINYINT(1) NOT NULL DEFAULT 0");
 
             string createMovements = @"
 CREATE TABLE IF NOT EXISTS daily_cash_movements

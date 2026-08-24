@@ -897,8 +897,10 @@ namespace BubbyPlanetShowroom
             {
                 lblCalcBalance.Text = "Short by: ₹ " + summary.Shortfall.ToString("0.00");
                 lblCalcBalance.ForeColor = Color.FromArgb(220, 38, 38);
-                lblCalcHint.Text = "Mall rule: new items must be ≥ return value.\nAdd more / higher value items.";
-                btnProcess.Text = "Process Exchange";
+                lblCalcHint.Text =
+                    "Process band — new items value return se kam hai.\n" +
+                    "Aur / mehange items add karein.";
+                btnProcess.Text = "Cannot Process";
                 UpdateSettlementPaymentUi("", 0);
             }
             else
@@ -913,6 +915,54 @@ namespace BubbyPlanetShowroom
                     summary.BalanceDue > 0 ? "collect" : "",
                     summary.BalanceDue);
             }
+
+            RefreshProcessButtonState(summary);
+        }
+
+        /// <summary>
+        /// Exchange mall rule: new items &lt; return value → Process stays off.
+        /// </summary>
+        private void RefreshProcessButtonState(ExchangeSummary? summary = null)
+        {
+            if (isProcessingReturn)
+            {
+                SetProcessEnabled(false);
+                return;
+            }
+
+            if (grid == null || !grid.Enabled || grid.Rows.Count == 0)
+            {
+                SetProcessEnabled(false);
+                return;
+            }
+
+            summary ??= ReturnCalculations.CalculateExchange(
+                GetCurrentReturnValue(),
+                GetCurrentExchangeValue());
+
+            // New items present but cheaper than return → block process.
+            if (summary.NewItemsValue > 0 && summary.Shortfall > 0)
+            {
+                SetProcessEnabled(false);
+                return;
+            }
+
+            bool hasReturnableLeft = false;
+            foreach (DataGridViewRow row in grid.Rows)
+            {
+                if (row.IsNewRow) continue;
+                int qty = Convert.ToInt32(row.Cells["qty"].Value);
+                int returned = 0;
+                if (grid.Columns.Contains("return_qty"))
+                    int.TryParse(row.Cells["return_qty"].Value?.ToString(), out returned);
+                if (qty - returned > 0)
+                {
+                    hasReturnableLeft = true;
+                    break;
+                }
+            }
+
+            SetProcessEnabled(hasReturnableLeft);
         }
 
         private void UpdateSettlementPaymentUi(string settlementType, decimal amount)
@@ -1547,13 +1597,16 @@ namespace BubbyPlanetShowroom
             decimal exchangeValue = GetCurrentExchangeValue();
             ExchangeSummary exchangeSummary = ReturnCalculations.CalculateExchange(returnValue, exchangeValue);
 
-            if (isExchange && !exchangeSummary.MeetsEqualOrMoreRule)
+            if (isExchange && (exchangeSummary.Shortfall > 0 || !exchangeSummary.MeetsEqualOrMoreRule))
             {
                 MessageBox.Show(
-                    "Exchange rule: naye items ki value return value se kam nahi ho sakti.\n\n" +
+                    "Return process nahi hoga.\n\n" +
+                    "Naye items ki value return value se kam hai.\n" +
+                    "New items ≥ return value hona zaroori hai.\n\n" +
                     "Return: ₹ " + exchangeSummary.ReturnValue.ToString("0.00") + "\n" +
                     "New items: ₹ " + exchangeSummary.NewItemsValue.ToString("0.00") + "\n" +
                     "Short by: ₹ " + exchangeSummary.Shortfall.ToString("0.00"));
+                RefreshProcessButtonState(exchangeSummary);
                 return;
             }
 
@@ -1998,7 +2051,7 @@ namespace BubbyPlanetShowroom
             finally
             {
                 isProcessingReturn = false;
-                SetProcessEnabled(grid != null && grid.Enabled && grid.Rows.Count > 0);
+                RefreshProcessButtonState();
             }
 
             if (!returnCompleted)

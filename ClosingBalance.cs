@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
 using System.Globalization;
@@ -84,7 +85,7 @@ namespace BubbyPlanetShowroom
 
             Label subtitle = new Label
             {
-                Text = "Daily counter cash-in, cash-out, owner handover and tomorrow opening balance",
+                Text = "Daily counter cash-in, cash-out, owner handover. Shop band din last closing automatically carry-forward hota hai.",
                 AutoSize = true,
                 Font = new Font("Segoe UI", 9),
                 ForeColor = textMuted,
@@ -324,6 +325,9 @@ namespace BubbyPlanetShowroom
                 Recalculate();
             };
 
+            Button btnShopClosed = CreateButton("Shop Closed", Color.FromArgb(217, 119, 6), 0, 0, 118);
+            btnShopClosed.Click += BtnShopClosed_Click;
+
             FlowLayoutPanel actions = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -336,6 +340,7 @@ namespace BubbyPlanetShowroom
             actions.Controls.Add(btnSave);
             actions.Controls.Add(btnClear);
             actions.Controls.Add(btnRefresh);
+            actions.Controls.Add(btnShopClosed);
             settlement.Controls.Add(actions, 4, 0);
 
             return settlement;
@@ -509,6 +514,22 @@ namespace BubbyPlanetShowroom
             grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(219, 234, 254);
             grid.DefaultCellStyle.SelectionForeColor = textMain;
             grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 250, 252);
+            grid.CellFormatting += Grid_CellFormatting;
+        }
+
+        private void Grid_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0 || !grid.Columns.Contains("Status"))
+                return;
+
+            if (grid.Columns[e.ColumnIndex].Name != "Status")
+                return;
+
+            if (e.Value?.ToString() == "Shop Closed")
+            {
+                e.CellStyle.ForeColor = Color.FromArgb(217, 119, 6);
+                e.CellStyle.Font = new Font("Segoe UI Semibold", 9, FontStyle.Bold);
+            }
         }
 
         private void EnsureSchema()
@@ -565,6 +586,45 @@ namespace BubbyPlanetShowroom
 
         private void BtnSave_Click(object sender, EventArgs e)
         {
+            SaveClosing(shopClosed: false);
+        }
+
+        private void BtnShopClosed_Click(object sender, EventArgs e)
+        {
+            if (!LoadAutoAmounts())
+                return;
+
+            decimal cashSales = ReadAmount(txtCashSales);
+            if (cashSales != 0)
+            {
+                MessageBox.Show("Aaj cash sale/return hai. Shop Closed sirf tab mark karein jab shop band ho.");
+                return;
+            }
+
+            if (cashInEntries.Rows.Count > 0 || cashOutEntries.Rows.Count > 0)
+            {
+                MessageBox.Show("Cash IN/OUT entries hain. Pehle unhe hatao ya normal closing save karo.");
+                return;
+            }
+
+            DialogResult confirm = MessageBox.Show(
+                "Aaj shop band mark karein?" + Environment.NewLine + Environment.NewLine +
+                "Last closing ka counter aaj ke opening aur closing dono me same rahega. Owner cash 0 hoga.",
+                "Shop Closed",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (confirm != DialogResult.Yes)
+                return;
+
+            txtOwnerCash.Text = "0";
+            txtClosingBalance.Text = txtOpeningBalance.Text;
+            Recalculate();
+            SaveClosing(shopClosed: true);
+        }
+
+        private void SaveClosing(bool shopClosed)
+        {
             DateTime closingDate = DateTime.Today;
             txtClosingDate.Text = closingDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
@@ -573,6 +633,23 @@ namespace BubbyPlanetShowroom
 
             if (!LoadAutoAmounts())
                 return;
+
+            if (shopClosed)
+            {
+                if (ReadAmount(txtCashSales) != 0)
+                {
+                    MessageBox.Show("Aaj cash sale/return hai. Shop Closed save nahi ho sakta.");
+                    return;
+                }
+
+                txtOwnerCash.Text = "0";
+                txtClosingBalance.Text = txtOpeningBalance.Text;
+                Recalculate();
+            }
+            else if (!ConfirmMissingSalesDays(closingDate))
+            {
+                return;
+            }
 
             decimal openingBalance = ReadAmount(txtOpeningBalance);
             decimal cashSales = ReadAmount(txtCashSales);
@@ -585,6 +662,7 @@ namespace BubbyPlanetShowroom
             decimal difference = ReadAmount(txtDifference);
             string user = string.IsNullOrWhiteSpace(LoginForm.LoggedInUser) ? "Unknown" : LoginForm.LoggedInUser;
             string role = string.IsNullOrWhiteSpace(MainForm.CurrentRole) ? "Unknown" : MainForm.CurrentRole;
+            string note = shopClosed ? "Shop Closed - balance carried forward" : "";
 
             try
             {
@@ -593,6 +671,8 @@ namespace BubbyPlanetShowroom
                 DB.EnsureClosingBalanceSchema(conn);
 
                 using MySqlTransaction tx = conn.BeginTransaction();
+
+                int filledClosedDays = FillClosedGapDays(conn, tx, closingDate, openingBalance, user, role);
 
                 int closingId = SaveClosingSummary(
                     conn,
@@ -608,14 +688,23 @@ namespace BubbyPlanetShowroom
                     expectedOwnerCash,
                     difference,
                     user,
-                    role);
+                    role,
+                    shopClosed,
+                    note);
 
                 ReplaceMovementEntries(conn, tx, closingId, closingDate, user, cashInEntries, "IN");
                 ReplaceMovementEntries(conn, tx, closingId, closingDate, user, cashOutEntries, "OUT");
 
                 tx.Commit();
 
-                MessageBox.Show("Closing balance saved/updated.");
+                string extra = filledClosedDays > 0
+                    ? Environment.NewLine + "Beech ke " + filledClosedDays.ToString(CultureInfo.InvariantCulture) +
+                      " shop-closed din last closing se carry-forward ho gaye."
+                    : "";
+
+                MessageBox.Show(shopClosed
+                    ? "Shop closed mark ho gaya. Last closing counter carry-forward ho gaya." + extra
+                    : "Closing balance saved/updated." + extra);
                 ClearFields();
                 LoadRecentClosings();
             }
@@ -639,7 +728,9 @@ namespace BubbyPlanetShowroom
             decimal expectedOwnerCash,
             decimal difference,
             string user,
-            string role)
+            string role,
+            bool shopClosed = false,
+            string note = "")
         {
             string query = @"
 INSERT INTO daily_cash_closing
@@ -647,14 +738,14 @@ INSERT INTO daily_cash_closing
     closing_date, opening_balance, cash_sales, other_cash_in, cash_in_reason,
     other_cash_out, cash_out_reason, counter_left_for_tomorrow, cash_given_to_owner,
     total_cash_in_hand, total_cash_out, available_before_closing, expected_owner_cash, difference_amount,
-    note, created_by_user, created_by_role
+    note, is_shop_closed, created_by_user, created_by_role
 )
 VALUES
 (
     @closing_date, @opening_balance, @cash_sales, @cash_in, @cash_in_reason,
     @cash_out, @cash_out_reason, @closing_balance, @owner_cash,
     @total_cash_in_hand, @total_cash_out, @available_before_closing, @expected_owner_cash, @difference_amount,
-    @note, @created_by_user, @created_by_role
+    @note, @is_shop_closed, @created_by_user, @created_by_role
 )
 ON DUPLICATE KEY UPDATE
     opening_balance = VALUES(opening_balance),
@@ -676,6 +767,7 @@ ON DUPLICATE KEY UPDATE
     expected_owner_cash = VALUES(expected_owner_cash),
     difference_amount = VALUES(difference_amount),
     note = VALUES(note),
+    is_shop_closed = VALUES(is_shop_closed),
     created_by_user = VALUES(created_by_user),
     created_by_role = VALUES(created_by_role),
     created_at = CURRENT_TIMESTAMP;";
@@ -685,9 +777,9 @@ ON DUPLICATE KEY UPDATE
             cmd.Parameters.AddWithValue("@opening_balance", openingBalance);
             cmd.Parameters.AddWithValue("@cash_sales", cashSales);
             cmd.Parameters.AddWithValue("@cash_in", cashIn);
-            cmd.Parameters.AddWithValue("@cash_in_reason", BuildReasonSummary(cashInEntries));
+            cmd.Parameters.AddWithValue("@cash_in_reason", shopClosed ? "Shop Closed" : BuildReasonSummary(cashInEntries));
             cmd.Parameters.AddWithValue("@cash_out", cashOut);
-            cmd.Parameters.AddWithValue("@cash_out_reason", BuildReasonSummary(cashOutEntries));
+            cmd.Parameters.AddWithValue("@cash_out_reason", shopClosed ? "Shop Closed" : BuildReasonSummary(cashOutEntries));
             cmd.Parameters.AddWithValue("@closing_balance", closingBalance);
             cmd.Parameters.AddWithValue("@owner_cash", ownerCash);
             cmd.Parameters.AddWithValue("@total_cash_in_hand", openingBalance + cashSales + cashIn);
@@ -695,7 +787,8 @@ ON DUPLICATE KEY UPDATE
             cmd.Parameters.AddWithValue("@available_before_closing", counterCash);
             cmd.Parameters.AddWithValue("@expected_owner_cash", expectedOwnerCash);
             cmd.Parameters.AddWithValue("@difference_amount", difference);
-            cmd.Parameters.AddWithValue("@note", "");
+            cmd.Parameters.AddWithValue("@note", note ?? "");
+            cmd.Parameters.AddWithValue("@is_shop_closed", shopClosed ? 1 : 0);
             cmd.Parameters.AddWithValue("@created_by_user", user);
             cmd.Parameters.AddWithValue("@created_by_role", role);
 
@@ -843,6 +936,7 @@ VALUES
                 string query = @"
 SELECT
     DATE_FORMAT(closing_date, '%d-%m-%Y') AS Date,
+    CASE WHEN IFNULL(is_shop_closed, 0) = 1 THEN 'Shop Closed' ELSE 'Open' END AS Status,
     opening_balance AS Opening,
     cash_sales AS CashSale,
     other_cash_in AS CashInTotal,
@@ -969,9 +1063,19 @@ ORDER BY id ASC;";
             try
             {
                 DateTime today = DateTime.Today;
-                txtOpeningBalance.Text = GetPreviousClosingBalance(today).ToString("0.00", CultureInfo.InvariantCulture);
+                decimal opening = 0;
+                if (TryGetPreviousClosing(today, out DateTime lastDate, out decimal lastAmount))
+                {
+                    opening = lastAmount;
+                    lblStatus.Text = BuildCarryForwardStatus(today, lastDate, lastAmount);
+                }
+                else
+                {
+                    lblStatus.Text = "Pehli closing. Opening 0.00 se start ho raha hai.";
+                }
+
+                txtOpeningBalance.Text = opening.ToString("0.00", CultureInfo.InvariantCulture);
                 txtCashSales.Text = GetCashSalesFromDb(today).ToString("0.00", CultureInfo.InvariantCulture);
-                lblStatus.Text = "Auto amounts loaded for " + today.ToString("dd-MM-yyyy", CultureInfo.InvariantCulture);
                 return true;
             }
             catch (Exception ex)
@@ -982,14 +1086,81 @@ ORDER BY id ASC;";
             }
         }
 
-        private decimal GetPreviousClosingBalance(DateTime date)
+        private string BuildCarryForwardStatus(DateTime today, DateTime lastDate, decimal lastAmount)
         {
+            string lastText = lastDate.ToString("dd-MM-yyyy", CultureInfo.InvariantCulture);
+            string amountText = lastAmount.ToString("0.00", CultureInfo.InvariantCulture);
+            List<DateTime> missingDays = GetMissingClosingDates(lastDate, today);
+
+            if (missingDays.Count == 0)
+            {
+                return "Opening Rs." + amountText + " last closing (" + lastText + ") se.";
+            }
+
+            List<string> closedDates = new List<string>();
+            List<string> salesMissing = new List<string>();
+            foreach (DateTime day in missingDays)
+            {
+                string dayText = day.ToString("dd-MM-yyyy", CultureInfo.InvariantCulture);
+                decimal sales = GetCashSalesFromDb(day);
+                if (sales == 0)
+                    closedDates.Add(dayText);
+                else
+                    salesMissing.Add(dayText + " Rs." + sales.ToString("0.00", CultureInfo.InvariantCulture));
+            }
+
+            string status = "Opening Rs." + amountText + " last closing (" + lastText + ") se.";
+            if (closedDates.Count > 0)
+                status += " Shop closed/missing: " + string.Join(", ", closedDates) + ".";
+            if (salesMissing.Count > 0)
+                status += " Warning: in din ka closing missing hai aur cash sale bhi hai: " + string.Join(", ", salesMissing) + ".";
+
+            return status;
+        }
+
+        private bool ConfirmMissingSalesDays(DateTime today)
+        {
+            if (!TryGetPreviousClosing(today, out DateTime lastDate, out _))
+                return true;
+
+            List<string> salesMissing = new List<string>();
+            foreach (DateTime day in GetMissingClosingDates(lastDate, today))
+            {
+                decimal sales = GetCashSalesFromDb(day);
+                if (sales == 0)
+                    continue;
+
+                salesMissing.Add(
+                    day.ToString("dd-MM-yyyy", CultureInfo.InvariantCulture) +
+                    "  Rs." +
+                    sales.ToString("0.00", CultureInfo.InvariantCulture));
+            }
+
+            if (salesMissing.Count == 0)
+                return true;
+
+            DialogResult go = MessageBox.Show(
+                "In din ka closing missing hai aur cash sale bhi hai:" + Environment.NewLine +
+                string.Join(Environment.NewLine, salesMissing) + Environment.NewLine + Environment.NewLine +
+                "Continue karoge to un din ki cash aaj ke opening me nahi aayegi.",
+                "Missing closing",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+
+            return go == DialogResult.Yes;
+        }
+
+        private bool TryGetPreviousClosing(DateTime date, out DateTime lastDate, out decimal amount)
+        {
+            lastDate = DateTime.MinValue;
+            amount = 0;
+
             using MySqlConnection conn = DB.GetConnection();
             conn.Open();
             DB.EnsureClosingBalanceSchema(conn);
 
             string query = @"
-SELECT counter_left_for_tomorrow
+SELECT closing_date, counter_left_for_tomorrow
 FROM daily_cash_closing
 WHERE closing_date < @closing_date
 ORDER BY closing_date DESC, id DESC
@@ -997,12 +1168,79 @@ LIMIT 1;";
 
             using MySqlCommand cmd = new MySqlCommand(query, conn);
             cmd.Parameters.AddWithValue("@closing_date", date.Date);
-            object result = cmd.ExecuteScalar();
+            using MySqlDataReader reader = cmd.ExecuteReader();
+            if (!reader.Read())
+                return false;
 
-            if (result == null || result == DBNull.Value)
+            lastDate = Convert.ToDateTime(reader["closing_date"]).Date;
+            amount = Convert.ToDecimal(reader["counter_left_for_tomorrow"], CultureInfo.InvariantCulture);
+            return true;
+        }
+
+        private static List<DateTime> GetMissingClosingDates(DateTime lastClosingDate, DateTime today)
+        {
+            List<DateTime> dates = new List<DateTime>();
+            for (DateTime day = lastClosingDate.Date.AddDays(1); day < today.Date; day = day.AddDays(1))
+                dates.Add(day);
+
+            return dates;
+        }
+
+        private int FillClosedGapDays(
+            MySqlConnection conn,
+            MySqlTransaction tx,
+            DateTime today,
+            decimal carryAmount,
+            string user,
+            string role)
+        {
+            if (!TryGetPreviousClosing(today, out DateTime lastDate, out decimal lastAmount))
                 return 0;
 
-            return Convert.ToDecimal(result, CultureInfo.InvariantCulture);
+            if (carryAmount == 0)
+                carryAmount = lastAmount;
+
+            int filled = 0;
+            foreach (DateTime day in GetMissingClosingDates(lastDate, today))
+            {
+                if (ClosingExists(conn, tx, day))
+                    continue;
+
+                if (GetCashSalesFromDb(day) != 0)
+                    continue;
+
+                SaveClosingSummary(
+                    conn,
+                    tx,
+                    day,
+                    carryAmount,
+                    0,
+                    0,
+                    0,
+                    0,
+                    carryAmount,
+                    carryAmount,
+                    0,
+                    0,
+                    user,
+                    role,
+                    shopClosed: true,
+                    note: "Shop Closed - balance carried forward");
+                filled++;
+            }
+
+            return filled;
+        }
+
+        private static bool ClosingExists(MySqlConnection conn, MySqlTransaction tx, DateTime date)
+        {
+            using MySqlCommand cmd = new MySqlCommand(
+                "SELECT 1 FROM daily_cash_closing WHERE closing_date = @closing_date LIMIT 1",
+                conn,
+                tx);
+            cmd.Parameters.AddWithValue("@closing_date", date.Date);
+            object result = cmd.ExecuteScalar();
+            return result != null && result != DBNull.Value;
         }
 
         private decimal GetCashSalesFromDb(DateTime date)
