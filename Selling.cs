@@ -203,14 +203,17 @@ namespace BubbyPlanetShowroom
             ordersCard.Padding = new Padding(1);
             dgvOrders = CreateGrid();
             dgvOrders.Columns.Add("OrderId", "Order ID");
+            dgvOrders.Columns.Add("Type", "Type");
             dgvOrders.Columns.Add("Date", "Date");
             dgvOrders.Columns.Add("Customer", "Customer");
             dgvOrders.Columns.Add("Mobile", "Mobile");
             dgvOrders.Columns.Add("Payment", "Payment");
             dgvOrders.Columns.Add("User", "User");
             dgvOrders.Columns.Add("Amount", "Amount");
+            dgvOrders.Columns.Add("RowKind", "RowKind");
+            dgvOrders.Columns["RowKind"].Visible = false;
             dgvOrders.SelectionChanged += DgvOrders_SelectionChanged;
-            Panel ordersHeaderBar = CreateSectionHeader("ORDERS", "Select a row to load item breakdown");
+            Panel ordersHeaderBar = CreateSectionHeader("ORDERS", "Return extra income is listed as a separate row");
             ordersCard.Controls.Add(dgvOrders);
             ordersCard.Controls.Add(ordersHeaderBar);
 
@@ -377,36 +380,55 @@ namespace BubbyPlanetShowroom
                 using (MySqlConnection conn = DB.GetConnection())
                 {
                     conn.Open();
+                    DB.EnsureReturnSettlementSchema(conn);
 
-                    string where = GetDateCondition();
-
-                    if (cmbUser.Text != "All Users")
-                        where += " AND o.created_by=@user";
-
-                    string query = @"
-            SELECT
-                COUNT(*) TotalOrders,
-                IFNULL(SUM(grand_total),0) TotalSale
-            FROM inv_orders o
-            WHERE " + where;
-
-                    MySqlCommand cmd = new MySqlCommand(query, conn);
+                    string orderWhere = GetDateCondition("o.date_added");
+                    string extraWhere = GetExchangeExtraWhere();
 
                     if (cmbUser.Text != "All Users")
-                        cmd.Parameters.AddWithValue("@user", cmbUser.Text);
-
-                    MySqlDataReader reader = cmd.ExecuteReader();
-
-                    if (reader.Read())
                     {
-                        lblTodayOrders.Text =
-                            "Orders : " + reader["TotalOrders"];
-
-                        lblTodaySale.Text =
-                            "Sale : ₹" +
-                            Convert.ToDecimal(reader["TotalSale"])
-                            .ToString("N2");
+                        orderWhere += " AND o.created_by=@user";
+                        extraWhere += " AND o.created_by=@user";
                     }
+
+                    decimal orderSale = 0;
+                    int orderCount = 0;
+                    using (MySqlCommand cmd = new MySqlCommand(
+                        @"SELECT COUNT(*) TotalOrders, IFNULL(SUM(grand_total),0) TotalSale
+                          FROM inv_orders o
+                          WHERE " + orderWhere,
+                        conn))
+                    {
+                        AddPeriodParams(cmd);
+                        if (cmbUser.Text != "All Users")
+                            cmd.Parameters.AddWithValue("@user", cmbUser.Text);
+
+                        using MySqlDataReader reader = cmd.ExecuteReader();
+                        if (reader.Read())
+                        {
+                            orderCount = Convert.ToInt32(reader["TotalOrders"]);
+                            orderSale = Convert.ToDecimal(reader["TotalSale"]);
+                        }
+                    }
+
+                    decimal extraSale = 0;
+                    using (MySqlCommand cmd = new MySqlCommand(
+                        @"SELECT IFNULL(SUM(s.amount),0)
+                          FROM inv_return_settlements s
+                          INNER JOIN inv_orders o ON o.id = s.order_id
+                          WHERE " + extraWhere,
+                        conn))
+                    {
+                        AddPeriodParams(cmd);
+                        if (cmbUser.Text != "All Users")
+                            cmd.Parameters.AddWithValue("@user", cmbUser.Text);
+
+                        object value = cmd.ExecuteScalar();
+                        extraSale = value == null || value == DBNull.Value ? 0 : Convert.ToDecimal(value);
+                    }
+
+                    lblTodayOrders.Text = "Orders : " + orderCount;
+                    lblTodaySale.Text = "Sale : ₹" + (orderSale + extraSale).ToString("N2");
                 }
             }
             catch (Exception ex)
@@ -424,57 +446,87 @@ namespace BubbyPlanetShowroom
                 using (MySqlConnection conn = DB.GetConnection())
                 {
                     conn.Open();
+                    DB.EnsureReturnSettlementSchema(conn);
 
-                    string where = GetDateCondition();
-
+                    string extraWhere = GetExchangeExtraWhere();
                     if (cmbUser.Text != "All Users")
-                        where += " AND o.created_by=@user";
+                        extraWhere += " AND o.created_by=@user";
 
-                    string query = @"
-            SELECT
-                o.id,
-                o.date_added,
-                o.payment_method,
-                o.grand_total,
-                o.created_by,
-                c.first_name,
-                c.sur_name,
-                c.phone
-            FROM inv_orders o
-            LEFT JOIN inv_customers c
-                ON c.id=o.customer_id
-            WHERE " + where + @"
-            ORDER BY o.id DESC";
-
-                    MySqlCommand cmd =
-                        new MySqlCommand(query, conn);
-
-                    if (cmbUser.Text != "All Users")
-                        cmd.Parameters.AddWithValue("@user",
-                            cmbUser.Text);
-
-                    MySqlDataReader reader =
-                        cmd.ExecuteReader();
-
-                    while (reader.Read())
+                    using (MySqlCommand cmd = new MySqlCommand(
+                        @"SELECT
+                              s.created_at,
+                              s.payment_method,
+                              s.amount,
+                              o.id AS order_id,
+                              o.created_by,
+                              c.first_name,
+                              c.sur_name,
+                              c.phone
+                          FROM inv_return_settlements s
+                          INNER JOIN inv_orders o ON o.id = s.order_id
+                          LEFT JOIN inv_customers c ON c.id = o.customer_id
+                          WHERE " + extraWhere + @"
+                          ORDER BY s.created_at DESC",
+                        conn))
                     {
-                        dgvOrders.Rows.Add(
-                            reader["id"],
-                            Convert.ToDateTime(
-                                reader["date_added"])
-                            .ToString("dd-MM-yyyy HH:mm"),
+                        AddPeriodParams(cmd);
+                        if (cmbUser.Text != "All Users")
+                            cmd.Parameters.AddWithValue("@user", cmbUser.Text);
 
-                            reader["first_name"] + " " +
-                            reader["sur_name"],
+                        using MySqlDataReader reader = cmd.ExecuteReader();
+                        while (reader.Read())
+                        {
+                            dgvOrders.Rows.Add(
+                                reader["order_id"],
+                                "Return extra income",
+                                Convert.ToDateTime(reader["created_at"]).ToString("dd-MM-yyyy HH:mm"),
+                                (reader["first_name"]?.ToString() + " " + reader["sur_name"]?.ToString()).Trim(),
+                                reader["phone"],
+                                reader["payment_method"],
+                                reader["created_by"],
+                                Convert.ToDecimal(reader["amount"]).ToString("N2"),
+                                "ReturnExtra");
+                        }
+                    }
 
-                            reader["phone"],
+                    string orderWhere = GetDateCondition("o.date_added");
+                    if (cmbUser.Text != "All Users")
+                        orderWhere += " AND o.created_by=@user";
 
-                            reader["payment_method"],
+                    using (MySqlCommand cmd = new MySqlCommand(
+                        @"SELECT
+                              o.id,
+                              o.date_added,
+                              o.payment_method,
+                              o.grand_total,
+                              o.created_by,
+                              c.first_name,
+                              c.sur_name,
+                              c.phone
+                          FROM inv_orders o
+                          LEFT JOIN inv_customers c ON c.id = o.customer_id
+                          WHERE " + orderWhere + @"
+                          ORDER BY o.id DESC",
+                        conn))
+                    {
+                        AddPeriodParams(cmd);
+                        if (cmbUser.Text != "All Users")
+                            cmd.Parameters.AddWithValue("@user", cmbUser.Text);
 
-                            reader["created_by"],
-
-                            reader["grand_total"]
-                        );
+                        using MySqlDataReader reader = cmd.ExecuteReader();
+                        while (reader.Read())
+                        {
+                            dgvOrders.Rows.Add(
+                                reader["id"],
+                                "Sale",
+                                Convert.ToDateTime(reader["date_added"]).ToString("dd-MM-yyyy HH:mm"),
+                                (reader["first_name"]?.ToString() + " " + reader["sur_name"]?.ToString()).Trim(),
+                                reader["phone"],
+                                reader["payment_method"],
+                                reader["created_by"],
+                                reader["grand_total"],
+                                "Sale");
+                        }
                     }
                 }
             }
@@ -495,7 +547,33 @@ namespace BubbyPlanetShowroom
                 Convert.ToInt32(
                     dgvOrders.CurrentRow.Cells["OrderId"].Value);
 
+            string rowKind = dgvOrders.CurrentRow.Cells["RowKind"].Value?.ToString() ?? "Sale";
+            if (string.Equals(rowKind, "ReturnExtra", StringComparison.OrdinalIgnoreCase))
+            {
+                LoadExchangeExtraDetail(dgvOrders.CurrentRow);
+                return;
+            }
+
             LoadOrderDetails(orderId);
+        }
+
+        private void LoadExchangeExtraDetail(DataGridViewRow row)
+        {
+            dgvDetails.Rows.Clear();
+            string amountText = row.Cells["Amount"].Value?.ToString() ?? "0";
+            dgvDetails.Rows.Add(
+                "Return extra income (bill #" + row.Cells["OrderId"].Value + ")",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                amountText);
         }
 
         private void LoadOrderDetails(int orderId)
@@ -607,31 +685,44 @@ namespace BubbyPlanetShowroom
             }
         }
 
-        private string GetDateCondition()
+        private string GetDateCondition(string dateColumn)
         {
+            return "DATE(" + dateColumn + ") BETWEEN @fromDate AND @toDate";
+        }
+
+        private void AddPeriodParams(MySqlCommand cmd)
+        {
+            DateTime from = DateTime.Today;
+            DateTime to = DateTime.Today;
+
             switch (cmbFilter.Text)
             {
-                case "Today":
-                    return "DATE(o.date_added)=CURDATE()";
-
                 case "Weekly":
-                    return "YEARWEEK(o.date_added)=YEARWEEK(CURDATE())";
-
+                    from = DateTime.Today.AddDays(-(int)DateTime.Today.DayOfWeek);
+                    to = from.AddDays(6);
+                    break;
                 case "Monthly":
-                    return "MONTH(o.date_added)=MONTH(CURDATE()) AND YEAR(o.date_added)=YEAR(CURDATE())";
-
+                    from = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+                    to = from.AddMonths(1).AddDays(-1);
+                    break;
                 case "Yearly":
-                    return "YEAR(o.date_added)=YEAR(CURDATE())";
-
+                    from = new DateTime(DateTime.Today.Year, 1, 1);
+                    to = new DateTime(DateTime.Today.Year, 12, 31);
+                    break;
                 case "Custom":
-                    return string.Format(
-                        "DATE(o.date_added) BETWEEN '{0}' AND '{1}'",
-                        dtFrom.Value.ToString("yyyy-MM-dd"),
-                        dtTo.Value.ToString("yyyy-MM-dd"));
-
-                default:
-                    return "1=1";
+                    from = dtFrom.Value.Date;
+                    to = dtTo.Value.Date;
+                    break;
             }
+
+            cmd.Parameters.AddWithValue("@fromDate", from);
+            cmd.Parameters.AddWithValue("@toDate", to);
+        }
+
+        private string GetExchangeExtraWhere()
+        {
+            return @"LOWER(TRIM(s.settlement_type)) = 'collect'
+                  AND " + GetDateCondition("s.created_at");
         }
     }
 }
