@@ -32,6 +32,7 @@ namespace BubbyPlanetShowroom
         Dictionary<string, Button> menuButtons = new Dictionary<string, Button>();
         private Receipt? receiptPage;
         private Return? returnPage;
+        private SellingPrice? sellingPricePage;
         private InternetConnectivityMonitor? internetMonitor;
 
         public MainForm()
@@ -89,6 +90,8 @@ namespace BubbyPlanetShowroom
             userChip.Visible = false;
             userChip.Paint += (s, e) =>
             {
+                if (userChip.Width < 2 || userChip.Height < 2)
+                    return;
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 using SolidBrush fill = new SolidBrush(Color.FromArgb(55, 255, 255, 255));
                 using Pen border = new Pen(Color.FromArgb(90, 255, 255, 255));
@@ -132,24 +135,32 @@ namespace BubbyPlanetShowroom
 
         private void LeftMenu_Paint(object? sender, PaintEventArgs e)
         {
+            Rectangle area = leftMenu.ClientRectangle;
+            if (area.Width <= 0 || area.Height <= 0)
+                return;
+
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
             // Soft light wash behind colorful tabs
             using (LinearGradientBrush wash = new LinearGradientBrush(
-                leftMenu.ClientRectangle,
+                area,
                 Color.FromArgb(248, 250, 252),
                 Color.FromArgb(226, 232, 240),
                 LinearGradientMode.Vertical))
             {
-                e.Graphics.FillRectangle(wash, leftMenu.ClientRectangle);
+                e.Graphics.FillRectangle(wash, area);
             }
 
             // Right edge accent (sky → lime)
-            using (LinearGradientBrush edge = new LinearGradientBrush(
-                new Rectangle(leftMenu.Width - 3, 0, 3, leftMenu.Height),
-                BrandNameLabel.BubbyColor, Lime, LinearGradientMode.Vertical))
+            if (leftMenu.Width >= 3 && leftMenu.Height > 0)
             {
-                e.Graphics.FillRectangle(edge, leftMenu.Width - 3, 0, 3, leftMenu.Height);
+                Rectangle edgeRect = new Rectangle(leftMenu.Width - 3, 0, 3, leftMenu.Height);
+                using (LinearGradientBrush edge = new LinearGradientBrush(
+                    edgeRect,
+                    BrandNameLabel.BubbyColor, Lime, LinearGradientMode.Vertical))
+                {
+                    e.Graphics.FillRectangle(edge, edgeRect);
+                }
             }
         }
 
@@ -157,6 +168,8 @@ namespace BubbyPlanetShowroom
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             Rectangle r = header.ClientRectangle;
+            if (r.Width <= 0 || r.Height <= 0)
+                return;
 
             using (LinearGradientBrush brush = new LinearGradientBrush(
                 r, HeaderDeep, HeaderSky, LinearGradientMode.Horizontal))
@@ -175,11 +188,15 @@ namespace BubbyPlanetShowroom
                 e.Graphics.FillEllipse(orb, header.Width - 160, -40, 200, 120);
 
             // Brand accent line (sky → lime)
-            using (LinearGradientBrush line = new LinearGradientBrush(
-                new Rectangle(0, header.Height - 4, header.Width, 4),
-                BrandNameLabel.BubbyColor, Lime, LinearGradientMode.Horizontal))
+            if (header.Width > 0 && header.Height >= 4)
             {
-                e.Graphics.FillRectangle(line, 0, header.Height - 4, header.Width, 4);
+                Rectangle lineRect = new Rectangle(0, header.Height - 4, header.Width, 4);
+                using (LinearGradientBrush line = new LinearGradientBrush(
+                    lineRect,
+                    BrandNameLabel.BubbyColor, Lime, LinearGradientMode.Horizontal))
+                {
+                    e.Graphics.FillRectangle(line, lineRect);
+                }
             }
 
             // Two-tone brand + subtitle — keep clear of right action buttons
@@ -272,6 +289,7 @@ namespace BubbyPlanetShowroom
             AddMenuButton("Users");
             AddMenuButton("Revenue");
             AddMenuButton("Discount");
+            AddMenuButton("Selling Price");
             AddMenuButton("Selling");
             AddMenuButton("Closing Balance");
         }
@@ -319,23 +337,37 @@ namespace BubbyPlanetShowroom
                 content.Controls.Clear();
 
                 string key = activeButton.Tag?.ToString() ?? text;
-                UserControl uc = key switch
+                UserControl? uc = null;
+                try
                 {
-                    "Add Item" => new AddItem(),
-                    "Master" => new Master(CurrentRole),
-                    "IN" => new Inward(),
-                    "Stock" => new Stock(),
-                    "Label" => new LabelPrint(),
-                    "Receipt" => receiptPage ??= new Receipt(),
-                    "Return" => returnPage ??= new Return(),
-                    "Profile" => new Profile(),
-                    "Users" => new Users(),
-                    "Revenue" => new Revenue(),
-                    "Discount" => new DiscountManager(CurrentRole),
-                    "Selling" => new Selling(),
-                    "Closing Balance" => new ClosingBalance(),
-                    _ => null
-                };
+                    uc = key switch
+                    {
+                        "Add Item" => new AddItem(),
+                        "Master" => new Master(CurrentRole),
+                        "IN" => new Inward(),
+                        "Stock" => new Stock(),
+                        "Label" => new LabelPrint(),
+                        "Receipt" => receiptPage ??= new Receipt(),
+                        "Return" => returnPage ??= new Return(),
+                        "Profile" => new Profile(),
+                        "Users" => new Users(),
+                        "Revenue" => new Revenue(),
+                        "Discount" => new DiscountManager(CurrentRole),
+                        "Selling Price" => sellingPricePage ??= new SellingPrice(CurrentRole),
+                        "Selling" => new Selling(),
+                        "Closing Balance" => new ClosingBalance(),
+                        _ => null
+                    };
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        $"Could not open '{key}'.\n\n{ex.Message}",
+                        "Tab Error",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                    return;
+                }
 
                 if (uc != null)
                 {
@@ -361,6 +393,9 @@ namespace BubbyPlanetShowroom
             if (sender is not Button btn)
                 return;
 
+            if (btn.Width < 8 || btn.Height < 8)
+                return;
+
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             string key = btn.Tag?.ToString() ?? "";
             bool active = ReferenceEquals(btn, activeButton);
@@ -373,6 +408,8 @@ namespace BubbyPlanetShowroom
                 : (hover ? Blend(logoColor, Color.White, 0.20f) : logoColor);
 
             Rectangle bounds = new Rectangle(1, 1, btn.Width - 3, btn.Height - 3);
+            if (bounds.Width <= 0 || bounds.Height <= 0)
+                return;
 
             using (GraphicsPath path = RoundedRect(bounds, 10))
             {
@@ -385,7 +422,7 @@ namespace BubbyPlanetShowroom
             }
 
             // Active accent bar (darker shade of same logo color)
-            if (active)
+            if (active && btn.Height > 16)
             {
                 using SolidBrush accent = new SolidBrush(Darken(logoColor, 0.35f));
                 e.Graphics.FillRectangle(accent, 5, 8, 3, btn.Height - 16);
@@ -441,6 +478,7 @@ namespace BubbyPlanetShowroom
             "Users" => Color.FromArgb(186, 230, 253),
             "Revenue" => Color.FromArgb(190, 242, 100),
             "Discount" => Color.FromArgb(253, 186, 116),
+            "Selling Price" => Color.FromArgb(253, 224, 71),
             "Selling" => Color.FromArgb(147, 197, 253),
             "Closing Balance" => Color.FromArgb(251, 113, 133),
             _ => Color.FromArgb(148, 163, 184)
@@ -540,6 +578,24 @@ namespace BubbyPlanetShowroom
                         TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
                     break;
 
+                case "Selling Price": // tag + 9
+                    Point[] priceTag =
+                    {
+                        new Point(cx - s, cy),
+                        new Point(cx - 2, cy - s),
+                        new Point(cx + s, cy - s),
+                        new Point(cx + s, cy + s),
+                        new Point(cx - 2, cy + s)
+                    };
+                    g.DrawPolygon(pen, priceTag);
+                    TextRenderer.DrawText(
+                        g, "9",
+                        new Font("Segoe UI", 7f, FontStyle.Bold),
+                        new Rectangle(chip.X + 2, chip.Y + 2, chip.Width - 2, chip.Height - 2),
+                        color,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                    break;
+
                 case "Selling": // cart
                     g.DrawLine(pen, cx - s, cy - 4, cx - s + 3, cy - 4);
                     g.DrawLine(pen, cx - s + 3, cy - 4, cx - 2, cy + 3);
@@ -569,8 +625,20 @@ namespace BubbyPlanetShowroom
 
         private static GraphicsPath RoundedRect(Rectangle bounds, int radius)
         {
-            int d = radius * 2;
             GraphicsPath path = new GraphicsPath();
+            if (bounds.Width <= 0 || bounds.Height <= 0)
+            {
+                path.AddRectangle(new Rectangle(bounds.X, bounds.Y, Math.Max(1, bounds.Width), Math.Max(1, bounds.Height)));
+                return path;
+            }
+
+            int d = Math.Min(radius * 2, Math.Min(bounds.Width, bounds.Height));
+            if (d <= 0)
+            {
+                path.AddRectangle(bounds);
+                return path;
+            }
+
             path.AddArc(bounds.X, bounds.Y, d, d, 180, 90);
             path.AddArc(bounds.Right - d, bounds.Y, d, d, 270, 90);
             path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
@@ -605,13 +673,40 @@ namespace BubbyPlanetShowroom
                 userChip.Visible = true;
                 if (btnLogout.Parent is Panel actions)
                     LayoutHeaderActions(actions);
+
+                // Crash recovery: open Receipt/Return so incomplete Process/Print can resume.
+                OpenPendingRecoveryTabIfNeeded();
             }
+        }
+
+        private void OpenPendingRecoveryTabIfNeeded()
+        {
+            bool hasSale = PendingSaleStore.Exists();
+            bool hasReturn = PendingReturnStore.Exists();
+            if (!hasSale && !hasReturn)
+                return;
+
+            string target = "Receipt";
+            if (hasSale && hasReturn)
+            {
+                DateTime saleAt = PendingSaleStore.Load()?.StartedAtUtc ?? DateTime.MinValue;
+                DateTime returnAt = PendingReturnStore.Load()?.StartedAtUtc ?? DateTime.MinValue;
+                target = returnAt > saleAt ? "Return" : "Receipt";
+            }
+            else if (hasReturn)
+            {
+                target = "Return";
+            }
+
+            if (menuButtons.TryGetValue(target, out Button? btn) && btn.Visible)
+                btn.PerformClick();
         }
 
         private void BtnLogout_Click(object sender, EventArgs e)
         {
             HideAllMenus();
             content.Controls.Clear();
+            sellingPricePage = null;
 
             lblUser.Text = "";
             CurrentRole = "";
@@ -630,7 +725,9 @@ namespace BubbyPlanetShowroom
                 string key = pair.Key;
                 bool show = false;
 
-                if (key == "Profile")
+                if (key == "Selling Price")
+                    show = role is "Master Admin" or "Admin";
+                else if (key == "Profile")
                     show = true;
                 else if (role == "Master Admin")
                     show = true;
@@ -649,7 +746,7 @@ namespace BubbyPlanetShowroom
         {
             try
             {
-                DBBackup.CreateBackup();
+                BackupProgressForm.RunBackupWithUi(this);
             }
             catch (Exception ex)
             {

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
 using System.Globalization;
@@ -30,10 +31,13 @@ namespace BubbyPlanetShowroom
 
         private readonly DataGridView cashInGrid = new DataGridView();
         private readonly DataGridView cashOutGrid = new DataGridView();
+        private readonly DataGridView todayBillsGrid = new DataGridView();
         private readonly DataGridView grid = new DataGridView();
         private readonly DataTable cashInEntries = CreateEntryTable();
         private readonly DataTable cashOutEntries = CreateEntryTable();
         private readonly Label lblStatus = new Label();
+        private readonly Label lblTodayBills = new Label();
+        private List<ClosingCashBillLine> todayCashBillLines = new List<ClosingCashBillLine>();
 
         private readonly Color pageBack = Color.FromArgb(245, 247, 251);
         private readonly Color textMain = Color.FromArgb(28, 37, 65);
@@ -84,7 +88,7 @@ namespace BubbyPlanetShowroom
 
             Label subtitle = new Label
             {
-                Text = "Daily counter cash-in, cash-out, owner handover and tomorrow opening balance",
+                Text = "Counter pe total cash = aaj ka opening + cash sale. Online extra bills mein already kata hai — Cash-OUT mein dubara mat daalo. Owner aur drawer bharo — Difference 0 hona chahiye.",
                 AutoSize = true,
                 Font = new Font("Segoe UI", 9),
                 ForeColor = textMuted,
@@ -94,61 +98,56 @@ namespace BubbyPlanetShowroom
             header.Controls.Add(title);
             header.Controls.Add(subtitle);
 
-            Panel formPanel = new Panel
-            {
-                Dock = DockStyle.Top,
-                Height = 520,
-                BackColor = Color.White,
-                Padding = new Padding(14),
-                BorderStyle = BorderStyle.FixedSingle
-            };
-
-            TableLayoutPanel formLayout = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                BackColor = Color.White,
-                ColumnCount = 4,
-                RowCount = 3
-            };
-            formLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
-            formLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
-            formLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
-            formLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
-            formLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 78));
-            formLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 280));
-            formLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-
-            AddField(formLayout, "Closing Date", txtClosingDate, 0, 0);
-            AddField(formLayout, "Opening Balance Auto", txtOpeningBalance, 1, 0);
-            AddField(formLayout, "Cash Sale From DB", txtCashSales, 2, 0);
-            AddField(formLayout, "Counter Cash", txtCounterCash, 3, 0);
+            TableLayoutPanel settlementPanel = CreateSettlementPanel();
+            settlementPanel.Dock = DockStyle.Top;
+            settlementPanel.Height = 86;
+            settlementPanel.Padding = new Padding(8, 6, 8, 0);
 
             Button btnAddCashIn = CreateButton("Add IN", green, 0, 0, 86);
             btnAddCashIn.Click += (s, e) => AddCashEntry(cashInEntries, txtCashInAmount, txtCashInReason, "Cash-IN");
 
-            Button btnRemoveCashIn = CreateButton("Remove IN", Color.FromArgb(100, 116, 139), 0, 0, 96);
+            Button btnRemoveCashIn = CreateButton("Remove", Color.FromArgb(100, 116, 139), 0, 0, 88);
             btnRemoveCashIn.Click += (s, e) => RemoveSelectedEntry(cashInGrid, cashInEntries);
 
             Button btnAddCashOut = CreateButton("Add OUT", red, 0, 0, 86);
             btnAddCashOut.Click += (s, e) => AddCashEntry(cashOutEntries, txtCashOutAmount, txtCashOutReason, "Cash-OUT");
 
-            Button btnRemoveCashOut = CreateButton("Remove OUT", Color.FromArgb(100, 116, 139), 0, 0, 104);
+            Button btnRemoveCashOut = CreateButton("Remove", Color.FromArgb(100, 116, 139), 0, 0, 88);
             btnRemoveCashOut.Click += (s, e) => RemoveSelectedEntry(cashOutGrid, cashOutEntries);
 
             ConfigureEntryGrid(cashInGrid, cashInEntries);
             ConfigureEntryGrid(cashOutGrid, cashOutEntries);
 
-            Panel cashInPanel = CreateMovementPanel("Cash-IN Entries", txtCashInAmount, txtCashInReason, btnAddCashIn, cashInGrid, btnRemoveCashIn, green);
-            Panel cashOutPanel = CreateMovementPanel("Cash-OUT Entries", txtCashOutAmount, txtCashOutReason, btnAddCashOut, cashOutGrid, btnRemoveCashOut, red);
-            formLayout.Controls.Add(cashInPanel, 0, 1);
-            formLayout.SetColumnSpan(cashInPanel, 2);
-            formLayout.Controls.Add(cashOutPanel, 2, 1);
-            formLayout.SetColumnSpan(cashOutPanel, 2);
+            Panel cashInPanel = CreateMovementPanel("Cash-IN", txtCashInAmount, txtCashInReason, btnAddCashIn, cashInGrid, btnRemoveCashIn, green);
+            Panel cashOutPanel = CreateMovementPanel("Cash-OUT", txtCashOutAmount, txtCashOutReason, btnAddCashOut, cashOutGrid, btnRemoveCashOut, red);
+            Panel todayBillsPanel = CreateTodayBillsPanel();
 
-            TableLayoutPanel settlementPanel = CreateSettlementPanel();
-            formLayout.Controls.Add(settlementPanel, 0, 2);
-            formLayout.SetColumnSpan(settlementPanel, 4);
-            formPanel.Controls.Add(formLayout);
+            TableLayoutPanel listsLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.White,
+                ColumnCount = 3,
+                RowCount = 1,
+                Padding = new Padding(4)
+            };
+            listsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 28));
+            listsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 44));
+            listsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 28));
+            listsLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            listsLayout.Controls.Add(cashInPanel, 0, 0);
+            listsLayout.Controls.Add(todayBillsPanel, 1, 0);
+            listsLayout.Controls.Add(cashOutPanel, 2, 0);
+
+            Panel formPanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 470,
+                BackColor = Color.White,
+                Padding = new Padding(8),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            formPanel.Controls.Add(listsLayout);
+            formPanel.Controls.Add(settlementPanel);
 
             lblStatus.Dock = DockStyle.Bottom;
             lblStatus.Height = 28;
@@ -223,16 +222,15 @@ namespace BubbyPlanetShowroom
             {
                 Dock = DockStyle.Fill,
                 BackColor = panelSoft,
-                ColumnCount = 3,
+                ColumnCount = 2,
                 RowCount = 4
             };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 135));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 104));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
             Label title = new Label
             {
@@ -243,7 +241,7 @@ namespace BubbyPlanetShowroom
                 TextAlign = ContentAlignment.MiddleLeft
             };
             layout.Controls.Add(title, 0, 0);
-            layout.SetColumnSpan(title, 3);
+            layout.SetColumnSpan(title, 2);
 
             Panel amountPanel = CreateFieldPanel("Amount", amountBox);
             Panel reasonPanel = CreateFieldPanel("Reason", reasonBox);
@@ -251,28 +249,17 @@ namespace BubbyPlanetShowroom
             layout.Controls.Add(reasonPanel, 1, 1);
 
             addButton.Dock = DockStyle.Fill;
-            addButton.Margin = new Padding(6, 18, 0, 5);
-            layout.Controls.Add(addButton, 2, 1);
+            addButton.Margin = new Padding(6, 4, 4, 2);
+            layout.Controls.Add(addButton, 0, 2);
+
+            removeButton.Dock = DockStyle.Fill;
+            removeButton.Margin = new Padding(4, 4, 6, 2);
+            layout.Controls.Add(removeButton, 1, 2);
 
             entryGrid.Dock = DockStyle.Fill;
-            entryGrid.Margin = new Padding(0, 10, 0, 4);
-            layout.Controls.Add(entryGrid, 0, 2);
-            layout.SetColumnSpan(entryGrid, 3);
-
-            Panel footer = new Panel
-            {
-                Dock = DockStyle.Fill,
-                BackColor = panelSoft
-            };
-
-            removeButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            removeButton.Location = new Point(footer.Width - removeButton.Width, 4);
-            removeButton.Margin = new Padding(0);
-            footer.Resize += (s, e) =>
-            {
-                removeButton.Location = new Point(Math.Max(0, footer.Width - removeButton.Width), 4);
-            };
-            footer.Controls.Add(removeButton);
+            entryGrid.Margin = new Padding(0, 6, 0, 0);
+            layout.Controls.Add(entryGrid, 0, 3);
+            layout.SetColumnSpan(entryGrid, 2);
 
             Panel accent = new Panel
             {
@@ -280,12 +267,8 @@ namespace BubbyPlanetShowroom
                 Dock = DockStyle.Left,
                 Width = 4
             };
-            footer.Controls.Add(accent);
-
-            layout.Controls.Add(footer, 0, 3);
-            layout.SetColumnSpan(footer, 3);
-
             section.Controls.Add(layout);
+            section.Controls.Add(accent);
             return section;
         }
 
@@ -297,48 +280,99 @@ namespace BubbyPlanetShowroom
                 BackColor = Color.White,
                 ColumnCount = 5,
                 RowCount = 1,
-                Padding = new Padding(0, 8, 0, 0)
+                Padding = new Padding(0, 4, 0, 0)
             };
-            settlement.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
-            settlement.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
-            settlement.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
-            settlement.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
-            settlement.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
+            settlement.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22));
+            settlement.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22));
+            settlement.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22));
+            settlement.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 18));
+            settlement.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 16));
             settlement.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-            AddField(settlement, "Owner Ko Cash Diya", txtOwnerCash, 0, 0);
-            AddField(settlement, "Closing Balance", txtClosingBalance, 1, 0);
-            AddField(settlement, "Expected Owner Cash", txtExpectedOwnerCash, 2, 0);
+            AddField(settlement, "Counter pe total cash", txtCounterCash, 0, 0);
+            AddField(settlement, "Owner ko kitna diya", txtOwnerCash, 1, 0);
+            AddField(settlement, "Drawer me kitna bacha", txtClosingBalance, 2, 0);
             AddField(settlement, "Difference", txtDifference, 3, 0);
 
             Button btnSave = CreateButton("Save Closing", green, 0, 0, 124);
             btnSave.Click += BtnSave_Click;
+            btnSave.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            btnSave.Location = new Point(0, 23);
+            btnSave.Size = new Size(124, 34);
 
-            Button btnClear = CreateButton("Clear", Color.FromArgb(71, 85, 105), 0, 0, 78);
-            btnClear.Click += (s, e) => ClearFields();
-
-            Button btnRefresh = CreateButton("Refresh", Color.FromArgb(37, 99, 235), 0, 0, 92);
-            btnRefresh.Click += (s, e) =>
-            {
-                LoadAutoAmounts();
-                Recalculate();
-            };
-
-            FlowLayoutPanel actions = new FlowLayoutPanel
+            Panel savePanel = new Panel
             {
                 Dock = DockStyle.Fill,
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = true,
-                Padding = new Padding(6, 19, 0, 0),
-                Margin = new Padding(6, 0, 0, 0),
-                BackColor = Color.White
+                BackColor = Color.Transparent,
+                Margin = new Padding(6)
             };
-            actions.Controls.Add(btnSave);
-            actions.Controls.Add(btnClear);
-            actions.Controls.Add(btnRefresh);
-            settlement.Controls.Add(actions, 4, 0);
+            savePanel.Resize += (s, e) => { btnSave.Width = savePanel.Width; };
+            savePanel.Controls.Add(btnSave);
+            settlement.Controls.Add(savePanel, 4, 0);
 
             return settlement;
+        }
+
+        private Panel CreateTodayBillsPanel()
+        {
+            Panel section = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = panelSoft,
+                Padding = new Padding(10, 6, 10, 6),
+                Margin = new Padding(6, 2, 6, 2),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+
+            lblTodayBills.Text = "Aaj ki cash bills";
+            lblTodayBills.Dock = DockStyle.Top;
+            lblTodayBills.Height = 36;
+            lblTodayBills.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
+            lblTodayBills.ForeColor = textMain;
+            lblTodayBills.TextAlign = ContentAlignment.MiddleLeft;
+            lblTodayBills.AutoEllipsis = true;
+
+            ConfigureTodayBillsGrid();
+            todayBillsGrid.Dock = DockStyle.Fill;
+
+            section.Controls.Add(todayBillsGrid);
+            section.Controls.Add(lblTodayBills);
+            return section;
+        }
+
+        private void ConfigureTodayBillsGrid()
+        {
+            todayBillsGrid.BorderStyle = BorderStyle.None;
+            todayBillsGrid.BackgroundColor = Color.White;
+            todayBillsGrid.RowHeadersVisible = false;
+            todayBillsGrid.AllowUserToAddRows = false;
+            todayBillsGrid.AllowUserToDeleteRows = false;
+            todayBillsGrid.ReadOnly = true;
+            todayBillsGrid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            todayBillsGrid.MultiSelect = false;
+            todayBillsGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            todayBillsGrid.ScrollBars = ScrollBars.Vertical;
+            todayBillsGrid.ColumnHeadersHeight = 30;
+            todayBillsGrid.RowTemplate.Height = 28;
+            todayBillsGrid.EnableHeadersVisualStyles = false;
+            todayBillsGrid.ColumnHeadersDefaultCellStyle.BackColor = navy;
+            todayBillsGrid.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
+            todayBillsGrid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
+            todayBillsGrid.DefaultCellStyle.Font = new Font("Segoe UI", 9f);
+            todayBillsGrid.DefaultCellStyle.ForeColor = textMain;
+            todayBillsGrid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(219, 234, 254);
+            todayBillsGrid.DefaultCellStyle.SelectionForeColor = textMain;
+            todayBillsGrid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 250, 252);
+            todayBillsGrid.Columns.Add("Bill", "Bill");
+            todayBillsGrid.Columns.Add("Time", "Time");
+            todayBillsGrid.Columns.Add("Type", "Type");
+            todayBillsGrid.Columns.Add("Amount", "Amount");
+            todayBillsGrid.Columns["Bill"].FillWeight = 22;
+            todayBillsGrid.Columns["Time"].FillWeight = 18;
+            todayBillsGrid.Columns["Type"].FillWeight = 32;
+            todayBillsGrid.Columns["Amount"].FillWeight = 28;
+            todayBillsGrid.Columns["Amount"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+            todayBillsGrid.Columns["Amount"].DefaultCellStyle.Format = "N2";
         }
 
         private Panel CreateFieldPanel(string labelText, TextBox textBox)
@@ -423,8 +457,19 @@ namespace BubbyPlanetShowroom
                 txt.KeyPress += OnlyDecimal_KeyPress;
             }
 
+            txtOwnerCash.Font = new Font("Segoe UI Semibold", 12f, FontStyle.Bold);
+            txtOwnerCash.BackColor = Color.FromArgb(254, 249, 195);
             txtOwnerCash.TextChanged += (s, e) => Recalculate();
+            txtOwnerCash.KeyUp += (s, e) => Recalculate();
+
+            txtClosingBalance.Font = new Font("Segoe UI Semibold", 12f, FontStyle.Bold);
+            txtClosingBalance.BackColor = Color.FromArgb(254, 249, 195);
             txtClosingBalance.TextChanged += (s, e) => Recalculate();
+            txtClosingBalance.KeyUp += (s, e) => Recalculate();
+
+            txtDifference.Font = new Font("Segoe UI Semibold", 12f, FontStyle.Bold);
+            txtCounterCash.Font = new Font("Segoe UI Semibold", 12f, FontStyle.Bold);
+            txtExpectedOwnerCash.Font = new Font("Segoe UI Semibold", 11f, FontStyle.Bold);
 
             TextBox[] calculated =
             {
@@ -439,6 +484,8 @@ namespace BubbyPlanetShowroom
                 txt.BackColor = Color.FromArgb(248, 250, 252);
                 txt.ForeColor = textMain;
             }
+
+            txtCounterCash.BackColor = Color.FromArgb(219, 234, 254);
         }
 
         private void ConfigureEntryGrid(DataGridView entryGrid, DataTable source)
@@ -480,8 +527,8 @@ namespace BubbyPlanetShowroom
 
             if (entryGrid.Columns.Contains("Reason"))
             {
-                entryGrid.Columns["Reason"].FillWeight = 82;
-                entryGrid.Columns["Reason"].MinimumWidth = 260;
+                entryGrid.Columns["Reason"].FillWeight = 70;
+                entryGrid.Columns["Reason"].MinimumWidth = 90;
             }
         }
 
@@ -497,18 +544,81 @@ namespace BubbyPlanetShowroom
             grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
             grid.MultiSelect = false;
             grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            grid.ScrollBars = ScrollBars.Both;
             grid.EnableHeadersVisualStyles = false;
-            grid.ColumnHeadersHeight = 38;
-            grid.RowTemplate.Height = 32;
+            grid.ColumnHeadersHeight = 36;
+            grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+            grid.RowTemplate.Height = 34;
             grid.GridColor = Color.FromArgb(226, 232, 240);
             grid.ColumnHeadersDefaultCellStyle.BackColor = navy;
             grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
             grid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI Semibold", 9, FontStyle.Bold);
-            grid.DefaultCellStyle.Font = new Font("Segoe UI", 9);
+            grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleLeft;
+            grid.ColumnHeadersDefaultCellStyle.Padding = new Padding(8, 0, 8, 0);
+            grid.DefaultCellStyle.Font = new Font("Segoe UI", 9.5f);
             grid.DefaultCellStyle.ForeColor = textMain;
+            grid.DefaultCellStyle.Padding = new Padding(8, 0, 8, 0);
             grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(219, 234, 254);
             grid.DefaultCellStyle.SelectionForeColor = textMain;
             grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 250, 252);
+            grid.CellFormatting += Grid_CellFormatting;
+            grid.DataBindingComplete += (s, e) => ApplyRecentGridColumns();
+        }
+
+        private void ApplyRecentGridColumns()
+        {
+            SetRecentColumn("Date", 11, 90, false);
+            SetRecentColumn("Status", 10, 90, false);
+            SetRecentColumn("Opening", 11, 90, true);
+            SetRecentColumn("Cash Sale", 12, 100, true);
+            SetRecentColumn("Cash In", 9, 80, true);
+            SetRecentColumn("Cash Out", 9, 80, true);
+            SetRecentColumn("Drawer", 11, 90, true);
+            SetRecentColumn("Owner", 11, 90, true);
+            SetRecentColumn("Difference", 11, 90, true);
+            SetRecentColumn("User", 10, 80, false);
+            SetRecentColumn("Saved At", 15, 130, false);
+        }
+
+        private void SetRecentColumn(string name, float fillWeight, int minWidth, bool money)
+        {
+            if (!grid.Columns.Contains(name))
+                return;
+
+            DataGridViewColumn col = grid.Columns[name];
+            col.FillWeight = fillWeight;
+            col.MinimumWidth = minWidth;
+            col.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+            col.SortMode = DataGridViewColumnSortMode.Automatic;
+            if (money)
+            {
+                col.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+                col.DefaultCellStyle.Format = "N2";
+                col.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleRight;
+            }
+        }
+
+        private void Grid_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0)
+                return;
+
+            string name = grid.Columns[e.ColumnIndex].Name;
+            if (name == "Status" && e.Value?.ToString() == "Shop Closed")
+            {
+                e.CellStyle.ForeColor = Color.FromArgb(217, 119, 6);
+                e.CellStyle.Font = new Font("Segoe UI Semibold", 9, FontStyle.Bold);
+                return;
+            }
+
+            if (name == "Difference" && e.Value != null && e.Value != DBNull.Value)
+            {
+                decimal amount = Convert.ToDecimal(e.Value);
+                if (amount != 0)
+                    e.CellStyle.ForeColor = red;
+                else
+                    e.CellStyle.ForeColor = green;
+            }
         }
 
         private void EnsureSchema()
@@ -543,6 +653,14 @@ namespace BubbyPlanetShowroom
                 return;
             }
 
+            if (string.Equals(label, "Cash-OUT", StringComparison.OrdinalIgnoreCase)
+                && WouldDuplicateOnlineExtra(amount, reason))
+            {
+                MessageBox.Show("Yeh amount already aaj ki cash bills mein Online extra se kat chuka hai. Cash-OUT mein dubara mat daalo.");
+                amountBox.Focus();
+                return;
+            }
+
             table.Rows.Add(amount, reason);
             amountBox.Text = "0";
             reasonBox.Clear();
@@ -565,6 +683,45 @@ namespace BubbyPlanetShowroom
 
         private void BtnSave_Click(object sender, EventArgs e)
         {
+            SaveClosing(shopClosed: false);
+        }
+
+        private void BtnShopClosed_Click(object sender, EventArgs e)
+        {
+            if (!LoadAutoAmounts())
+                return;
+
+            decimal cashSales = ReadAmount(txtCashSales);
+            if (cashSales != 0)
+            {
+                MessageBox.Show("Aaj cash sale/return hai. Shop Closed sirf tab mark karein jab shop band ho.");
+                return;
+            }
+
+            if (cashInEntries.Rows.Count > 0 || cashOutEntries.Rows.Count > 0)
+            {
+                MessageBox.Show("Cash IN/OUT entries hain. Pehle unhe hatao ya normal closing save karo.");
+                return;
+            }
+
+            DialogResult confirm = MessageBox.Show(
+                "Aaj shop band mark karein?" + Environment.NewLine + Environment.NewLine +
+                "Last closing ka counter aaj ke opening aur closing dono me same rahega. Owner cash 0 hoga.",
+                "Shop Closed",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (confirm != DialogResult.Yes)
+                return;
+
+            txtOwnerCash.Text = "0";
+            SetAmount(txtClosingBalance, ReadAmount(txtOpeningBalance));
+            Recalculate();
+            SaveClosing(shopClosed: true);
+        }
+
+        private void SaveClosing(bool shopClosed)
+        {
             DateTime closingDate = DateTime.Today;
             txtClosingDate.Text = closingDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
@@ -574,17 +731,40 @@ namespace BubbyPlanetShowroom
             if (!LoadAutoAmounts())
                 return;
 
+            if (shopClosed)
+            {
+                if (ReadAmount(txtCashSales) != 0)
+                {
+                    MessageBox.Show("Aaj cash sale/return hai. Shop Closed save nahi ho sakta.");
+                    return;
+                }
+
+                txtOwnerCash.Text = "0";
+                SetAmount(txtClosingBalance, ReadAmount(txtOpeningBalance));
+                Recalculate();
+            }
+            else if (!ConfirmMissingSalesDays(closingDate))
+            {
+                return;
+            }
+            else
+            {
+                Recalculate();
+            }
+
             decimal openingBalance = ReadAmount(txtOpeningBalance);
             decimal cashSales = ReadAmount(txtCashSales);
             decimal cashIn = GetEntryTotal(cashInEntries);
-            decimal cashOut = GetEntryTotal(cashOutEntries);
+            decimal cashOut = GetCountableCashOut();
             decimal ownerCash = ReadAmount(txtOwnerCash);
             decimal closingBalance = ReadAmount(txtClosingBalance);
             decimal counterCash = ReadAmount(txtCounterCash);
             decimal expectedOwnerCash = ReadAmount(txtExpectedOwnerCash);
-            decimal difference = ReadAmount(txtDifference);
+            decimal difference = ClosingCashCalculations.ActualDifference(
+                counterCash, closingBalance, ownerCash);
             string user = string.IsNullOrWhiteSpace(LoginForm.LoggedInUser) ? "Unknown" : LoginForm.LoggedInUser;
             string role = string.IsNullOrWhiteSpace(MainForm.CurrentRole) ? "Unknown" : MainForm.CurrentRole;
+            string note = shopClosed ? "Shop Closed - balance carried forward" : "";
 
             try
             {
@@ -593,6 +773,8 @@ namespace BubbyPlanetShowroom
                 DB.EnsureClosingBalanceSchema(conn);
 
                 using MySqlTransaction tx = conn.BeginTransaction();
+
+                int filledClosedDays = FillClosedGapDays(conn, tx, closingDate, openingBalance, user, role);
 
                 int closingId = SaveClosingSummary(
                     conn,
@@ -608,16 +790,26 @@ namespace BubbyPlanetShowroom
                     expectedOwnerCash,
                     difference,
                     user,
-                    role);
+                    role,
+                    shopClosed,
+                    note);
 
                 ReplaceMovementEntries(conn, tx, closingId, closingDate, user, cashInEntries, "IN");
                 ReplaceMovementEntries(conn, tx, closingId, closingDate, user, cashOutEntries, "OUT");
 
                 tx.Commit();
 
-                MessageBox.Show("Closing balance saved/updated.");
-                ClearFields();
+                string extra = filledClosedDays > 0
+                    ? Environment.NewLine + "Beech ke " + filledClosedDays.ToString(CultureInfo.InvariantCulture) +
+                      " shop-closed din last closing se carry-forward ho gaye."
+                    : "";
+
+                MessageBox.Show(shopClosed
+                    ? "Shop closed mark ho gaya. Last closing counter carry-forward ho gaya." + extra
+                    : "Closing balance saved/updated." + extra);
+                LoadAutoAmounts();
                 LoadRecentClosings();
+                Recalculate();
             }
             catch (Exception ex)
             {
@@ -639,7 +831,9 @@ namespace BubbyPlanetShowroom
             decimal expectedOwnerCash,
             decimal difference,
             string user,
-            string role)
+            string role,
+            bool shopClosed = false,
+            string note = "")
         {
             string query = @"
 INSERT INTO daily_cash_closing
@@ -647,14 +841,14 @@ INSERT INTO daily_cash_closing
     closing_date, opening_balance, cash_sales, other_cash_in, cash_in_reason,
     other_cash_out, cash_out_reason, counter_left_for_tomorrow, cash_given_to_owner,
     total_cash_in_hand, total_cash_out, available_before_closing, expected_owner_cash, difference_amount,
-    note, created_by_user, created_by_role
+    note, is_shop_closed, created_by_user, created_by_role
 )
 VALUES
 (
     @closing_date, @opening_balance, @cash_sales, @cash_in, @cash_in_reason,
     @cash_out, @cash_out_reason, @closing_balance, @owner_cash,
     @total_cash_in_hand, @total_cash_out, @available_before_closing, @expected_owner_cash, @difference_amount,
-    @note, @created_by_user, @created_by_role
+    @note, @is_shop_closed, @created_by_user, @created_by_role
 )
 ON DUPLICATE KEY UPDATE
     opening_balance = VALUES(opening_balance),
@@ -676,6 +870,7 @@ ON DUPLICATE KEY UPDATE
     expected_owner_cash = VALUES(expected_owner_cash),
     difference_amount = VALUES(difference_amount),
     note = VALUES(note),
+    is_shop_closed = VALUES(is_shop_closed),
     created_by_user = VALUES(created_by_user),
     created_by_role = VALUES(created_by_role),
     created_at = CURRENT_TIMESTAMP;";
@@ -685,9 +880,9 @@ ON DUPLICATE KEY UPDATE
             cmd.Parameters.AddWithValue("@opening_balance", openingBalance);
             cmd.Parameters.AddWithValue("@cash_sales", cashSales);
             cmd.Parameters.AddWithValue("@cash_in", cashIn);
-            cmd.Parameters.AddWithValue("@cash_in_reason", BuildReasonSummary(cashInEntries));
+            cmd.Parameters.AddWithValue("@cash_in_reason", shopClosed ? "Shop Closed" : BuildReasonSummary(cashInEntries));
             cmd.Parameters.AddWithValue("@cash_out", cashOut);
-            cmd.Parameters.AddWithValue("@cash_out_reason", BuildReasonSummary(cashOutEntries));
+            cmd.Parameters.AddWithValue("@cash_out_reason", shopClosed ? "Shop Closed" : BuildReasonSummary(cashOutEntries));
             cmd.Parameters.AddWithValue("@closing_balance", closingBalance);
             cmd.Parameters.AddWithValue("@owner_cash", ownerCash);
             cmd.Parameters.AddWithValue("@total_cash_in_hand", openingBalance + cashSales + cashIn);
@@ -695,7 +890,8 @@ ON DUPLICATE KEY UPDATE
             cmd.Parameters.AddWithValue("@available_before_closing", counterCash);
             cmd.Parameters.AddWithValue("@expected_owner_cash", expectedOwnerCash);
             cmd.Parameters.AddWithValue("@difference_amount", difference);
-            cmd.Parameters.AddWithValue("@note", "");
+            cmd.Parameters.AddWithValue("@note", note ?? "");
+            cmd.Parameters.AddWithValue("@is_shop_closed", shopClosed ? 1 : 0);
             cmd.Parameters.AddWithValue("@created_by_user", user);
             cmd.Parameters.AddWithValue("@created_by_role", role);
 
@@ -760,7 +956,7 @@ VALUES
             if (!ValidateNonNegative(txtOwnerCash, "Owner cash"))
                 return false;
 
-            if (!ValidateNonNegative(txtClosingBalance, "Closing balance"))
+            if (!ValidateNonNegative(txtClosingBalance, "Drawer me kitna bacha"))
                 return false;
 
             return true;
@@ -777,26 +973,48 @@ VALUES
             return false;
         }
 
+        private bool isRecalculating;
+
         private void Recalculate()
         {
-            decimal openingBalance = ReadAmount(txtOpeningBalance);
-            decimal cashSales = ReadAmount(txtCashSales);
-            decimal cashIn = GetEntryTotal(cashInEntries);
-            decimal cashOut = GetEntryTotal(cashOutEntries);
-            decimal ownerCash = ReadAmount(txtOwnerCash);
-            decimal closingBalance = ReadAmount(txtClosingBalance);
+            if (isRecalculating)
+                return;
 
-            decimal counterCash = openingBalance + cashSales + cashIn - cashOut;
-            decimal expectedOwnerCash = counterCash - closingBalance;
-            decimal difference = expectedOwnerCash - ownerCash;
+            isRecalculating = true;
+            try
+            {
+                StripCashOutsThatDuplicateOnlineExtras();
 
-            SetAmount(txtCashInTotal, cashIn);
-            SetAmount(txtCashOutTotal, cashOut);
-            SetAmount(txtCounterCash, counterCash);
-            SetAmount(txtExpectedOwnerCash, expectedOwnerCash);
-            SetAmount(txtDifference, difference);
+                decimal openingBalance = ReadAmount(txtOpeningBalance);
+                decimal cashSales = ReadAmount(txtCashSales);
+                decimal cashIn = GetEntryTotal(cashInEntries);
+                decimal cashOut = GetCountableCashOut();
+                decimal ownerCash = ReadAmount(txtOwnerCash);
+                decimal closingBalance = ReadAmount(txtClosingBalance);
 
-            txtDifference.ForeColor = difference == 0 ? green : red;
+                decimal counterCash = ClosingCashCalculations.CounterTotal(
+                    openingBalance, cashSales, cashIn, cashOut);
+                decimal expectedOwnerCash = counterCash - closingBalance;
+                decimal actualDifference = ClosingCashCalculations.ActualDifference(
+                    counterCash, closingBalance, ownerCash);
+                decimal shownDifference = ClosingCashCalculations.ShownDifference(
+                    counterCash, closingBalance, ownerCash);
+
+                SetAmount(txtCashInTotal, cashIn);
+                SetAmount(txtCashOutTotal, cashOut);
+                SetAmount(txtCounterCash, counterCash);
+                SetAmount(txtExpectedOwnerCash, expectedOwnerCash);
+                SetAmount(txtDifference, shownDifference);
+
+                txtDifference.ForeColor = shownDifference == 0 ? green : red;
+                txtDifference.BackColor = shownDifference == 0
+                    ? Color.FromArgb(220, 252, 231)
+                    : Color.FromArgb(254, 226, 226);
+            }
+            finally
+            {
+                isRecalculating = false;
+            }
         }
 
         private decimal GetEntryTotal(DataTable entries)
@@ -808,6 +1026,50 @@ VALUES
             }
 
             return total;
+        }
+
+        private List<decimal> GetTodayOnlineExtras()
+        {
+            return ClosingCashCalculations.OnlineExtraAmounts(todayCashBillLines);
+        }
+
+        private bool WouldDuplicateOnlineExtra(decimal amount, string reason)
+        {
+            List<decimal> remaining = GetTodayOnlineExtras();
+            foreach (DataRow row in cashOutEntries.Rows)
+            {
+                ClosingCashCalculations.TryConsumeDuplicateOnlineCashOut(
+                    Convert.ToDecimal(row["Amount"]),
+                    row["Reason"]?.ToString() ?? "",
+                    remaining);
+            }
+
+            return ClosingCashCalculations.TryConsumeDuplicateOnlineCashOut(amount, reason, remaining);
+        }
+
+        private void StripCashOutsThatDuplicateOnlineExtras()
+        {
+            List<decimal> remaining = GetTodayOnlineExtras();
+            for (int i = cashOutEntries.Rows.Count - 1; i >= 0; i--)
+            {
+                decimal amount = Convert.ToDecimal(cashOutEntries.Rows[i]["Amount"]);
+                string reason = cashOutEntries.Rows[i]["Reason"]?.ToString() ?? "";
+                if (ClosingCashCalculations.TryConsumeDuplicateOnlineCashOut(amount, reason, remaining))
+                    cashOutEntries.Rows.RemoveAt(i);
+            }
+        }
+
+        private decimal GetCountableCashOut()
+        {
+            var amounts = new List<decimal>();
+            var reasons = new List<string>();
+            foreach (DataRow row in cashOutEntries.Rows)
+            {
+                amounts.Add(Convert.ToDecimal(row["Amount"]));
+                reasons.Add(row["Reason"]?.ToString() ?? "");
+            }
+
+            return ClosingCashCalculations.CountableCashOut(amounts, reasons, GetTodayOnlineExtras());
         }
 
         private string BuildReasonSummary(DataTable entries)
@@ -843,15 +1105,16 @@ VALUES
                 string query = @"
 SELECT
     DATE_FORMAT(closing_date, '%d-%m-%Y') AS Date,
+    CASE WHEN IFNULL(is_shop_closed, 0) = 1 THEN 'Shop Closed' ELSE 'Open' END AS Status,
     opening_balance AS Opening,
-    cash_sales AS CashSale,
-    other_cash_in AS CashInTotal,
-    other_cash_out AS CashOutTotal,
-    counter_left_for_tomorrow AS ClosingBalance,
-    cash_given_to_owner AS OwnerCash,
+    cash_sales AS `Cash Sale`,
+    other_cash_in AS `Cash In`,
+    other_cash_out AS `Cash Out`,
+    counter_left_for_tomorrow AS Drawer,
+    cash_given_to_owner AS Owner,
     difference_amount AS Difference,
-    created_by_user AS EnteredBy,
-    DATE_FORMAT(created_at, '%d-%m-%Y %h:%i %p') AS EnteredAt
+    created_by_user AS `User`,
+    DATE_FORMAT(created_at, '%d-%m-%Y %h:%i %p') AS `Saved At`
 FROM daily_cash_closing
 ORDER BY closing_date DESC, id DESC
 LIMIT 100;";
@@ -896,6 +1159,7 @@ LIMIT 100;";
                 string query = @"
 SELECT
     id,
+    cash_sales,
     other_cash_in,
     cash_in_reason,
     other_cash_out,
@@ -914,14 +1178,18 @@ LIMIT 1;";
                     return;
 
                 int closingId = Convert.ToInt32(reader["id"]);
+                decimal savedCashSales = Convert.ToDecimal(reader["cash_sales"], CultureInfo.InvariantCulture);
                 decimal cashInTotal = Convert.ToDecimal(reader["other_cash_in"]);
                 decimal cashOutTotal = Convert.ToDecimal(reader["other_cash_out"]);
                 string cashInReason = reader["cash_in_reason"]?.ToString() ?? "";
                 string cashOutReason = reader["cash_out_reason"]?.ToString() ?? "";
-
-                txtClosingBalance.Text = Convert.ToDecimal(reader["counter_left_for_tomorrow"]).ToString("0.00", CultureInfo.InvariantCulture);
-                txtOwnerCash.Text = Convert.ToDecimal(reader["cash_given_to_owner"]).ToString("0.00", CultureInfo.InvariantCulture);
+                decimal savedLeftover = Convert.ToDecimal(reader["counter_left_for_tomorrow"]);
+                decimal savedOwner = Convert.ToDecimal(reader["cash_given_to_owner"]);
                 reader.Close();
+
+                decimal lateCash = ClosingCashCalculations.LateCashDelta(savedCashSales, ReadAmount(txtCashSales));
+                SetAmount(txtClosingBalance, savedLeftover);
+                SetAmount(txtOwnerCash, savedOwner);
 
                 int inRows = LoadMovementEntries(conn, closingId, "IN", cashInEntries);
                 int outRows = LoadMovementEntries(conn, closingId, "OUT", cashOutEntries);
@@ -932,7 +1200,13 @@ LIMIT 1;";
                 if (outRows == 0 && cashOutTotal > 0)
                     cashOutEntries.Rows.Add(cashOutTotal, cashOutReason);
 
-                lblStatus.Text = "Today's saved closing loaded for update.";
+                lblStatus.Text = lateCash == 0
+                    ? "Today's saved closing loaded for update."
+                    : lateCash > 0
+                        ? "Save ke baad Rs." + lateCash.ToString("0.00", CultureInfo.InvariantCulture) +
+                          " extra cash bill aayi. Difference me dikh raha hai."
+                        : "Save ke baad Rs." + Math.Abs(lateCash).ToString("0.00", CultureInfo.InvariantCulture) +
+                          " cash kam hui. Difference me dikh raha hai.";
             }
             catch (Exception ex)
             {
@@ -964,14 +1238,59 @@ ORDER BY id ASC;";
             return count;
         }
 
+        private void LoadTodayCashBills(DateTime day)
+        {
+            todayBillsGrid.Rows.Clear();
+            todayCashBillLines = new List<ClosingCashBillLine>();
+            try
+            {
+                List<ClosingCashBillLine> lines = ClosingCashStore.GetCashBillLines(day);
+                todayCashBillLines = lines;
+                decimal total = 0;
+                foreach (ClosingCashBillLine line in lines)
+                {
+                    todayBillsGrid.Rows.Add(
+                        "#" + line.OrderId.ToString(CultureInfo.InvariantCulture),
+                        line.At.ToString("HH:mm", CultureInfo.InvariantCulture),
+                        line.Kind,
+                        line.Amount.ToString("0.00", CultureInfo.InvariantCulture));
+                    total += line.Amount;
+                }
+
+                decimal opening = ReadAmount(txtOpeningBalance);
+                string openingText = "Opening Rs." + opening.ToString("0.00", CultureInfo.InvariantCulture);
+                string billsText = lines.Count == 0
+                    ? "Aaj ki cash bills — koi bill nahi"
+                    : "Aaj ki cash bills: " + lines.Count.ToString(CultureInfo.InvariantCulture) +
+                      "  =  Rs." + total.ToString("0.00", CultureInfo.InvariantCulture);
+
+                lblTodayBills.Text = openingText + "   ·   " + billsText;
+            }
+            catch (Exception ex)
+            {
+                lblTodayBills.Text = "Aaj ki cash bills load nahi hui: " + ex.Message;
+            }
+        }
+
         private bool LoadAutoAmounts()
         {
             try
             {
                 DateTime today = DateTime.Today;
-                txtOpeningBalance.Text = GetPreviousClosingBalance(today).ToString("0.00", CultureInfo.InvariantCulture);
+                decimal opening = 0;
+                if (TryGetPreviousClosing(today, out DateTime lastDate, out decimal lastAmount))
+                {
+                    opening = lastAmount;
+                    lblStatus.Text = BuildCarryForwardStatus(today, lastDate, lastAmount);
+                }
+                else
+                {
+                    lblStatus.Text = "Pehli closing. Opening 0.00 se start ho raha hai.";
+                }
+
+                txtOpeningBalance.Text = opening.ToString("0.00", CultureInfo.InvariantCulture);
                 txtCashSales.Text = GetCashSalesFromDb(today).ToString("0.00", CultureInfo.InvariantCulture);
-                lblStatus.Text = "Auto amounts loaded for " + today.ToString("dd-MM-yyyy", CultureInfo.InvariantCulture);
+                LoadTodayCashBills(today);
                 return true;
             }
             catch (Exception ex)
@@ -982,14 +1301,81 @@ ORDER BY id ASC;";
             }
         }
 
-        private decimal GetPreviousClosingBalance(DateTime date)
+        private string BuildCarryForwardStatus(DateTime today, DateTime lastDate, decimal lastAmount)
         {
+            string lastText = lastDate.ToString("dd-MM-yyyy", CultureInfo.InvariantCulture);
+            string amountText = lastAmount.ToString("0.00", CultureInfo.InvariantCulture);
+            List<DateTime> missingDays = GetMissingClosingDates(lastDate, today);
+
+            if (missingDays.Count == 0)
+            {
+                return "Opening Rs." + amountText + " last closing (" + lastText + ") se.";
+            }
+
+            List<string> closedDates = new List<string>();
+            List<string> salesMissing = new List<string>();
+            foreach (DateTime day in missingDays)
+            {
+                string dayText = day.ToString("dd-MM-yyyy", CultureInfo.InvariantCulture);
+                decimal sales = GetCashSalesFromDb(day);
+                if (sales == 0)
+                    closedDates.Add(dayText);
+                else
+                    salesMissing.Add(dayText + " Rs." + sales.ToString("0.00", CultureInfo.InvariantCulture));
+            }
+
+            string status = "Opening Rs." + amountText + " last closing (" + lastText + ") se.";
+            if (closedDates.Count > 0)
+                status += " Shop closed/missing: " + string.Join(", ", closedDates) + ".";
+            if (salesMissing.Count > 0)
+                status += " Warning: in din ka closing missing hai aur cash sale bhi hai: " + string.Join(", ", salesMissing) + ".";
+
+            return status;
+        }
+
+        private bool ConfirmMissingSalesDays(DateTime today)
+        {
+            if (!TryGetPreviousClosing(today, out DateTime lastDate, out _))
+                return true;
+
+            List<string> salesMissing = new List<string>();
+            foreach (DateTime day in GetMissingClosingDates(lastDate, today))
+            {
+                decimal sales = GetCashSalesFromDb(day);
+                if (sales == 0)
+                    continue;
+
+                salesMissing.Add(
+                    day.ToString("dd-MM-yyyy", CultureInfo.InvariantCulture) +
+                    "  Rs." +
+                    sales.ToString("0.00", CultureInfo.InvariantCulture));
+            }
+
+            if (salesMissing.Count == 0)
+                return true;
+
+            DialogResult go = MessageBox.Show(
+                "In din ka closing missing hai aur cash sale bhi hai:" + Environment.NewLine +
+                string.Join(Environment.NewLine, salesMissing) + Environment.NewLine + Environment.NewLine +
+                "Continue karoge to un din ki cash aaj ke opening me nahi aayegi.",
+                "Missing closing",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+
+            return go == DialogResult.Yes;
+        }
+
+        private bool TryGetPreviousClosing(DateTime date, out DateTime lastDate, out decimal amount)
+        {
+            lastDate = DateTime.MinValue;
+            amount = 0;
+
             using MySqlConnection conn = DB.GetConnection();
             conn.Open();
             DB.EnsureClosingBalanceSchema(conn);
 
             string query = @"
-SELECT counter_left_for_tomorrow
+SELECT closing_date, counter_left_for_tomorrow
 FROM daily_cash_closing
 WHERE closing_date < @closing_date
 ORDER BY closing_date DESC, id DESC
@@ -997,35 +1383,84 @@ LIMIT 1;";
 
             using MySqlCommand cmd = new MySqlCommand(query, conn);
             cmd.Parameters.AddWithValue("@closing_date", date.Date);
-            object result = cmd.ExecuteScalar();
+            using MySqlDataReader reader = cmd.ExecuteReader();
+            if (!reader.Read())
+                return false;
 
-            if (result == null || result == DBNull.Value)
+            lastDate = Convert.ToDateTime(reader["closing_date"]).Date;
+            amount = Convert.ToDecimal(reader["counter_left_for_tomorrow"], CultureInfo.InvariantCulture);
+            return true;
+        }
+
+        private static List<DateTime> GetMissingClosingDates(DateTime lastClosingDate, DateTime today)
+        {
+            List<DateTime> dates = new List<DateTime>();
+            for (DateTime day = lastClosingDate.Date.AddDays(1); day < today.Date; day = day.AddDays(1))
+                dates.Add(day);
+
+            return dates;
+        }
+
+        private int FillClosedGapDays(
+            MySqlConnection conn,
+            MySqlTransaction tx,
+            DateTime today,
+            decimal carryAmount,
+            string user,
+            string role)
+        {
+            if (!TryGetPreviousClosing(today, out DateTime lastDate, out decimal lastAmount))
                 return 0;
 
-            return Convert.ToDecimal(result, CultureInfo.InvariantCulture);
+            if (carryAmount == 0)
+                carryAmount = lastAmount;
+
+            int filled = 0;
+            foreach (DateTime day in GetMissingClosingDates(lastDate, today))
+            {
+                if (ClosingExists(conn, tx, day))
+                    continue;
+
+                if (GetCashSalesFromDb(day) != 0)
+                    continue;
+
+                SaveClosingSummary(
+                    conn,
+                    tx,
+                    day,
+                    carryAmount,
+                    0,
+                    0,
+                    0,
+                    0,
+                    carryAmount,
+                    carryAmount,
+                    0,
+                    0,
+                    user,
+                    role,
+                    shopClosed: true,
+                    note: "Shop Closed - balance carried forward");
+                filled++;
+            }
+
+            return filled;
+        }
+
+        private static bool ClosingExists(MySqlConnection conn, MySqlTransaction tx, DateTime date)
+        {
+            using MySqlCommand cmd = new MySqlCommand(
+                "SELECT 1 FROM daily_cash_closing WHERE closing_date = @closing_date LIMIT 1",
+                conn,
+                tx);
+            cmd.Parameters.AddWithValue("@closing_date", date.Date);
+            object result = cmd.ExecuteScalar();
+            return result != null && result != DBNull.Value;
         }
 
         private decimal GetCashSalesFromDb(DateTime date)
         {
-            using MySqlConnection conn = DB.GetConnection();
-            conn.Open();
-
-            DB.EnsureColumnExists(conn, "inv_orders", "payment_method", "VARCHAR(40) NOT NULL DEFAULT 'Cash'");
-
-            string query = @"
-SELECT IFNULL(SUM(grand_total), 0)
-FROM inv_orders
-WHERE DATE(date_added) = @sale_date
-  AND LOWER(TRIM(IFNULL(payment_method, 'Cash'))) = 'cash';";
-
-            using MySqlCommand cmd = new MySqlCommand(query, conn);
-            cmd.Parameters.AddWithValue("@sale_date", date.Date);
-            object result = cmd.ExecuteScalar();
-
-            if (result == null || result == DBNull.Value)
-                return 0;
-
-            return Convert.ToDecimal(result, CultureInfo.InvariantCulture);
+            return ClosingCashStore.GetCashSalesFromDb(date);
         }
 
         private decimal ReadAmount(TextBox textBox)

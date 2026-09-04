@@ -1,19 +1,22 @@
 ﻿using System;
-using System.Diagnostics;
 using System.IO;
-using System.Windows.Forms;
 using MySql.Data.MySqlClient;
 
 namespace BubbyPlanetShowroom
 {
     internal class DBBackup
     {
+        private static readonly string BackupFolder =
+            @"G:\My Drive\ProductionBubbyPlanet\Inv_DB";
+
         public static void CreateBackup()
         {
             string connStr = "server=localhost;user=root;password=;database=showroom_db;";
 
+            Directory.CreateDirectory(BackupFolder);
+
             string backupFile = Path.Combine(
-                @"G:\My Drive\ProductionBubbyPlanet\Inv_DB",
+                BackupFolder,
                 "showroom_db" + DateTime.Now.ToString("dd_MM_yyyy_HH_mm_ss") + ".sql");
 
             using (MySqlConnection conn = new MySqlConnection(connStr))

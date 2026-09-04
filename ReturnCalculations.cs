@@ -93,18 +93,24 @@ namespace BubbyPlanetShowroom
             decimal refundGross = Round2(grossAmount / currentRemaining * returnNow);
             decimal refundDiscount = Round2(discountAmount / currentRemaining * returnNow);
             decimal refundTaxable = Round2(taxableAmount / currentRemaining * returnNow);
-            decimal refundGst = Round2(gstAmount / currentRemaining * returnNow);
+
+            decimal newNet = Round2(netAmount - refund);
+            decimal newGross = Round2(grossAmount - refundGross);
+            decimal newDiscount = Round2(discountAmount - refundDiscount);
+            decimal newTaxable = Round2(taxableAmount - refundTaxable);
+            // Keep GST as residual so taxable + gst always equals net (no paisa drift).
+            decimal newGst = Round2(newNet - newTaxable);
 
             return new ReturnLineResult
             {
                 NewReturnQty = newReturnQty,
                 NewRemainingQty = newRemaining,
                 Refund = refund,
-                NewGrossAmount = Round2(grossAmount - refundGross),
-                NewDiscountAmount = Round2(discountAmount - refundDiscount),
-                NewTaxableAmount = Round2(taxableAmount - refundTaxable),
-                NewGstAmount = Round2(gstAmount - refundGst),
-                NewNetAmount = Round2(netAmount - refund)
+                NewGrossAmount = newGross,
+                NewDiscountAmount = newDiscount,
+                NewTaxableAmount = newTaxable,
+                NewGstAmount = newGst,
+                NewNetAmount = newNet
             };
         }
 
@@ -119,6 +125,54 @@ namespace BubbyPlanetShowroom
                 total += value;
             return Round2(total);
         }
+
+        /// <summary>
+        /// Mall exchange rule: new items must be equal or higher than return value.
+        /// Balance due is what customer pays (new - return). Cash refund is 0 on exchange.
+        /// </summary>
+        public static ExchangeSummary CalculateExchange(decimal returnValue, decimal newItemsValue)
+        {
+            returnValue = Round2(Math.Max(0, returnValue));
+            newItemsValue = Round2(Math.Max(0, newItemsValue));
+
+            decimal balanceDue = Round2(Math.Max(0, newItemsValue - returnValue));
+            decimal shortfall = Round2(Math.Max(0, returnValue - newItemsValue));
+
+            return new ExchangeSummary
+            {
+                ReturnValue = returnValue,
+                NewItemsValue = newItemsValue,
+                BalanceDue = balanceDue,
+                Shortfall = shortfall,
+                IsValid = shortfall <= 0 && (returnValue > 0 || newItemsValue > 0),
+                MeetsEqualOrMoreRule = shortfall <= 0 && returnValue > 0 && newItemsValue > 0
+            };
+        }
+
+        public static void CalculateLineAmounts(
+            decimal sellingPrice,
+            decimal gstPercent,
+            decimal discountPercent,
+            int qty,
+            out decimal taxable,
+            out decimal gstAmount,
+            out decimal gross,
+            out decimal net)
+        {
+            if (discountPercent < 0) discountPercent = 0;
+            if (discountPercent > 100) discountPercent = 100;
+            if (qty < 0) qty = 0;
+            if (gstPercent < 0) gstPercent = 0;
+
+            decimal discountAmountPerUnit = (sellingPrice * discountPercent) / 100m;
+            decimal netAmountPerUnit = sellingPrice - discountAmountPerUnit;
+            net = Round2(netAmountPerUnit * qty);
+            gross = Round2(sellingPrice * qty);
+            taxable = gstPercent <= 0
+                ? net
+                : Round2((net * 100m) / (100m + gstPercent));
+            gstAmount = Round2(net - taxable);
+        }
     }
 
     public sealed class ReturnLineResult
@@ -131,5 +185,15 @@ namespace BubbyPlanetShowroom
         public decimal NewTaxableAmount { get; init; }
         public decimal NewGstAmount { get; init; }
         public decimal NewNetAmount { get; init; }
+    }
+
+    public sealed class ExchangeSummary
+    {
+        public decimal ReturnValue { get; init; }
+        public decimal NewItemsValue { get; init; }
+        public decimal BalanceDue { get; init; }
+        public decimal Shortfall { get; init; }
+        public bool IsValid { get; init; }
+        public bool MeetsEqualOrMoreRule { get; init; }
     }
 }

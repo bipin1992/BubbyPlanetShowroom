@@ -106,6 +106,12 @@ namespace BubbyPlanetShowroom
         private decimal lastRewardCheckGrandTotal = -1;
 
         private bool isLoadingHoldBill = false;
+        private bool pendingResumeChecked = false;
+        private int lastScanRowIndex = -1;
+        private bool lastScanQtyOnly;
+        private static readonly Color ScanNewRowColor = Color.FromArgb(167, 243, 208);
+        private static readonly Color ScanQtyCellColor = Color.FromArgb(250, 204, 21);
+        private static readonly Color ScanQtyRowTint = Color.FromArgb(254, 249, 195);
         private string currentMembership = "";
         private TextBox txtPaidAmount;
         private TextBox txtBillAmount;
@@ -365,6 +371,16 @@ namespace BubbyPlanetShowroom
             {
                 isLoadingHoldBill = false;
             }
+
+            // Re-check eligibility after hold resume (customer may have redeemed elsewhere).
+            EnsureAppliedRewardStillEligible();
+            if (rewardApplied)
+            {
+                if (!HasRewardApplicableRows())
+                    RemoveRewardDiscount();
+                else
+                    ApplyRewardDiscount();
+            }
         }
 
         private void CalculateLineAmounts(
@@ -380,6 +396,10 @@ namespace BubbyPlanetShowroom
                 discountPercent = 0;
             if (discountPercent > 100)
                 discountPercent = 100;
+            if (gstPercent < 0)
+                gstPercent = 0;
+            if (qty < 0)
+                qty = 0;
 
             // Discount on GST-inclusive selling price.
             decimal discountAmountPerUnit = (sellingPrice * discountPercent) / 100m;
@@ -389,7 +409,9 @@ namespace BubbyPlanetShowroom
             total = Round2(netAmountPerUnit * qty);
 
             // Reverse-calculate taxable value from GST-inclusive net amount.
-            subtotal = Round2((total * 100m) / (100m + gstPercent));
+            subtotal = gstPercent <= 0
+                ? total
+                : Round2((total * 100m) / (100m + gstPercent));
 
             // GST amount = net amount - taxable value.
             gstAmount = Round2(total - subtotal);
@@ -405,6 +427,7 @@ namespace BubbyPlanetShowroom
             {
                 BeginInvoke(new Action(() =>
                 {
+                    TryResumePendingSaleOnStartup();
                     txtBarcode.Focus();
                     txtBarcode.SelectAll();
                 }));
@@ -978,8 +1001,21 @@ namespace BubbyPlanetShowroom
             rightPanel.Controls.Add(lstHoldBills);
 
             dgvRight.CellEndEdit += DgvRight_CellEndEdit;
+            dgvRight.CellFormatting += DgvRight_LastScanCellFormatting;
             dgvRight.RowsAdded += (s, e) => UpdateActionButtonsState();
-            dgvRight.RowsRemoved += (s, e) => UpdateActionButtonsState();
+            dgvRight.RowsRemoved += (s, e) =>
+            {
+                if (lastScanRowIndex >= dgvRight.Rows.Count)
+                    lastScanRowIndex = -1;
+                UpdateActionButtonsState();
+                // Delete key removes rows without CellEndEdit — must refresh totals
+                // or saved/printed grand_total stays stale (overcharge).
+                if (!isLoadingHoldBill)
+                {
+                    RecalculateTotals();
+                    EnsureAppliedRewardStillEligible();
+                }
+            };
             UpdateActionButtonsState();
             txtPaidAmount.TextChanged += (s, e) => CalculateReturnAmount();
 
@@ -1175,6 +1211,8 @@ namespace BubbyPlanetShowroom
                 }
 
                 decimal discount;
+                // Manual lines: keep cashier sale % only (no reward on that item),
+                // but their net value still counts in reward eligibility total.
                 if (IsManualDiscountRow(row))
                 {
                     discount = GetCellDecimal(row, "Manual_Discount");
@@ -1246,6 +1284,13 @@ namespace BubbyPlanetShowroom
             if (isLoadingHoldBill || !rewardApplied)
                 return;
 
+            // Qty 0 removes the line — if only manual (or empty) left, reward has nowhere to apply.
+            if (!HasRewardApplicableRows())
+            {
+                RemoveRewardDiscount();
+                return;
+            }
+
             string mobile = txtMobile.Text.Trim();
             if (!IsValidMobile(mobile))
             {
@@ -1276,7 +1321,8 @@ namespace BubbyPlanetShowroom
                     decimal eligiblePurchase =
                         Round2(previousPurchase + currentBill);
 
-                    if (!TryGetRewardRule(
+                    if (currentBill <= 0 ||
+                        !TryGetRewardRule(
                             conn,
                             eligiblePurchase,
                             out _,
@@ -1425,11 +1471,41 @@ namespace BubbyPlanetShowroom
                 return;
             }
 
+            // All lines are manual sale discounts → reward would lock cycle with 0% benefit.
+            if (!HasRewardApplicableRows())
+            {
+                MessageBox.Show(
+                    "Is bill me sirf manual discount wale items hain.\n" +
+                    "Reward un items pe nahi lagta.\n\n" +
+                    "Normal (non-sale) item add karein, tab reward redeem hoga.",
+                    "Reward Program",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                rewardApplied = false;
+                rewardDiscountPercent = 0;
+                currentMembership = "";
+                return;
+            }
+
             rewardApplied = true;
             rewardDiscountPercent = rewardDiscount;
             lastRewardMobile = txtMobile.Text.Trim();
 
             ApplyRewardDiscount();
+        }
+
+        private bool HasRewardApplicableRows()
+        {
+            foreach (DataGridViewRow row in dgvRight.Rows)
+            {
+                if (row.IsNewRow)
+                    continue;
+                if (row.Cells[0].Value == null)
+                    continue;
+                if (!IsManualDiscountRow(row))
+                    return true;
+            }
+            return false;
         }
 
         private void ApplyRewardDiscount()
@@ -1439,6 +1515,8 @@ namespace BubbyPlanetShowroom
                 if (row.IsNewRow)
                     continue;
 
+                // Manual sale-counter discount is locked for that item only.
+                // Reward must NOT change it. Reward applies only to non-manual items.
                 if (IsManualDiscountRow(row))
                 {
                     SetDiscountBreakdown(row, 0, GetCellDecimal(row, "Manual_Discount"), 0);
@@ -1839,6 +1917,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
 
                     existingRow.Cells["Item_Id"].Value = itemId;
                     existingRow.Cells["Color"].Value = color;
+                    HighlightLastScan(existingRow, qtyOnly: true);
                 }
                 else
                 {
@@ -1872,12 +1951,42 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                         0,
                         currentRewardDiscount
                     );
+                    HighlightLastScan(dgvRight.Rows[dgvRight.Rows.Count - 1], qtyOnly: false);
                 }
 
                 RecalculateTotals();
             }
 
             return true;
+        }
+
+        private void HighlightLastScan(DataGridViewRow row, bool qtyOnly)
+        {
+            if (row == null || row.Index < 0)
+                return;
+
+            int previous = lastScanRowIndex;
+            lastScanRowIndex = row.Index;
+            lastScanQtyOnly = qtyOnly;
+
+            if (previous >= 0 && previous < dgvRight.Rows.Count)
+                dgvRight.InvalidateRow(previous);
+            dgvRight.InvalidateRow(row.Index);
+        }
+
+        private void DgvRight_LastScanCellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.RowIndex != lastScanRowIndex)
+                return;
+
+            Color fill = lastScanQtyOnly && e.ColumnIndex == 4
+                ? ScanQtyCellColor
+                : lastScanQtyOnly
+                    ? ScanQtyRowTint
+                    : ScanNewRowColor;
+
+            e.CellStyle.BackColor = fill;
+            e.CellStyle.SelectionBackColor = fill;
         }
 
         private int GetAgeMonths(DateTime addedOn, DateTime now)
@@ -1949,59 +2058,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
         }
 
         private decimal GetAutoDiscountPercent(MySqlConnection conn, string itemCode, bool isStaffCustomer)
-        {
-            try
-            {
-                using var cmd = new MySqlCommand(@"
-                SELECT IFNULL(r.discount_percent,0)
-                FROM inv_items_master i
-                JOIN inv_stock s ON LOWER(TRIM(s.item_code)) = LOWER(TRIM(i.item_code))
-                JOIN inv_age_discount_rules r ON r.is_active = 1
-                WHERE LOWER(TRIM(i.item_code)) = LOWER(TRIM(@code))
-                  AND r.min_age_months <= TIMESTAMPDIFF(MONTH, DATE(s.date_added), CURDATE())
-                  AND (IFNULL(r.staff_only,0) = 0 OR @isStaff = 1)
-                  AND (
-                    (
-                      r.item_code IS NOT NULL
-                      AND TRIM(r.item_code) <> ''
-                      AND LOWER(TRIM(r.item_code)) = LOWER(TRIM(i.item_code))
-                    )
-                    OR
-                    (
-                      (r.item_code IS NULL OR TRIM(r.item_code) = '')
-                      AND (r.main_category IS NULL OR TRIM(r.main_category) = '' OR LOWER(TRIM(r.main_category)) = LOWER(TRIM(IFNULL(i.main_category,''))))
-                      AND (r.sub_category IS NULL OR TRIM(r.sub_category) = '' OR LOWER(TRIM(r.sub_category)) = LOWER(TRIM(IFNULL(i.sub_category,''))))
-                      AND (r.gender IS NULL OR TRIM(r.gender) = '' OR LOWER(TRIM(r.gender)) = LOWER(TRIM(IFNULL(i.gender,''))))
-                    )
-                  )
-                ORDER BY
-                  (
-                    CASE WHEN IFNULL(r.staff_only,0) = 1 THEN 16 ELSE 0 END +
-                    CASE WHEN r.item_code IS NOT NULL AND TRIM(r.item_code) <> '' THEN 8 ELSE 0 END +
-                    CASE WHEN r.main_category IS NOT NULL AND TRIM(r.main_category) <> '' THEN 4 ELSE 0 END +
-                    CASE WHEN r.sub_category IS NOT NULL AND TRIM(r.sub_category) <> '' THEN 2 ELSE 0 END +
-                    CASE WHEN r.gender IS NOT NULL AND TRIM(r.gender) <> '' THEN 1 ELSE 0 END
-                  ) DESC,
-                  r.min_age_months DESC,
-                  r.discount_percent DESC
-                LIMIT 1;", conn);
-
-                cmd.Parameters.AddWithValue("@code", (itemCode ?? "").Trim());
-                cmd.Parameters.AddWithValue("@isStaff", isStaffCustomer ? 1 : 0);
-                object val = cmd.ExecuteScalar();
-                if (val == null)
-                    return 0;
-
-                decimal d = Convert.ToDecimal(val);
-                if (d < 0) d = 0;
-                if (d > 100) d = 100;
-                return d;
-            }
-            catch
-            {
-                return 0;
-            }
-        }
+            => AutoDiscountHelper.GetAutoDiscountPercent(conn, itemCode, isStaffCustomer);
 
         private void DebugDiscountDecision(string itemCode, string mainCategory, DateTime stockAddedOn, decimal discountPercent)
         {
@@ -2327,6 +2384,16 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             if (!ValidateBill())
                 return;
 
+            // Resume policy: ONLY after Print is clicked.
+            // Scanning / hold / typing before this — no checkpoint; crash = re-enter bill.
+            try
+            {
+                PendingSaleStore.Save(BuildPendingCheckpoint(PendingSaleStage.PrintClicked, 0));
+            }
+            catch
+            {
+            }
+
             btnPrint.Enabled = false;
             try
             {
@@ -2648,12 +2715,6 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 return false;
             }
 
-            //if (!HasInternetConnection())
-            //{
-            //    MessageBox.Show("Internet connection is not available. Please connect to internet and try again.");
-            //    return false;
-            //}
-
             ConfigureReceiptPaperSize();
             PrinterRouting.ApplyReceiptReturnPrinter(printDocument);
             if (!printDocument.PrinterSettings.IsValid)
@@ -2661,6 +2722,38 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 MessageBox.Show("No valid receipt printer found. Please install/select printer.");
                 return false;
             }
+
+            // If previous run already committed this bill, only reprint (avoid duplicate order).
+            PendingSaleCheckpoint? existingPending = PendingSaleStore.Load();
+            if (existingPending != null &&
+                existingPending.OrderId > 0 &&
+                (existingPending.Stage == PendingSaleStage.DbCommitted ||
+                 existingPending.Stage == PendingSaleStage.PrintStarted) &&
+                OrderExistsInDb(existingPending.OrderId))
+            {
+                lastOrderId = existingPending.OrderId;
+                try
+                {
+                    existingPending.Stage = PendingSaleStage.PrintStarted;
+                    PendingSaleStore.Save(existingPending);
+                    printDocument.Print();
+                    PendingSaleStore.Clear();
+                    MessageBox.Show("Order already saved. Reprint done ✅\nOrder ID: " + existingPending.OrderId);
+                    ResetBill();
+                    return true;
+                }
+                catch (Exception printEx)
+                {
+                    MessageBox.Show(
+                        "Order already in DB (ID: " + existingPending.OrderId +
+                        "), reprint failed:\n" + printEx.Message);
+                    return true;
+                }
+            }
+
+            // Durable checkpoint — Print already clicked (may refresh snapshot / stage).
+            PendingSaleCheckpoint pending = BuildPendingCheckpoint(PendingSaleStage.PrintClicked, 0);
+            PendingSaleStore.Save(pending);
 
             using (MySqlConnection conn = DB.GetConnection())
             {
@@ -2670,6 +2763,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 if (!RevalidateStockBeforeSave(conn, out string stockError))
                 {
                     MessageBox.Show(stockError);
+                    // Keep pending file so next start can retry the same bill.
                     return false;
                 }
 
@@ -2681,7 +2775,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                     int orderId = InsertOrder(conn, transaction, customerId);
                     lastOrderId = orderId;
                     InsertOrderDetails(conn, transaction, orderId);
-                    if (rewardApplied)
+                    if (rewardApplied && HasRewardApplicableRows())
                     {
                         MySqlCommand rewardCmd =
                             new MySqlCommand(@"
@@ -2696,18 +2790,31 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                         rewardCmd.ExecuteNonQuery();
                     }
 
-                    
-                    // Uncomment for testing
-                    //PrintPreviewDialog preview = new PrintPreviewDialog();
-                    //preview.Document = printDocument;
-                    //preview.Width = 1200;
-                    //preview.Height = 800;
-                    //preview.ShowDialog();
-
-                    // Uncomment for production
-                    printDocument.Print();
+                    // Persist order id BEFORE commit so a crash after commit still knows the id.
+                    pending = BuildPendingCheckpoint(PendingSaleStage.DbCommitted, orderId);
+                    PendingSaleStore.Save(pending);
 
                     transaction.Commit();
+
+                    ClosingCashStore.SyncTodaysSavedClosing();
+
+                    pending.Stage = PendingSaleStage.PrintStarted;
+                    PendingSaleStore.Save(pending);
+
+                    try
+                    {
+                        printDocument.Print();
+                    }
+                    catch (Exception printEx)
+                    {
+                        MessageBox.Show(
+                            "Order saved (ID: " + orderId + "), but print failed:\n" + printEx.Message +
+                            "\n\nApp dubara khologe to reprint resume ho sakta hai.");
+                        // Keep pending (DbCommitted/PrintStarted) for resume reprint.
+                        return true;
+                    }
+
+                    PendingSaleStore.Clear();
                     MessageBox.Show("Order Saved Successfully ✅\nOrder ID: " + orderId);
                     ResetBill();
                     return true;
@@ -2715,8 +2822,262 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 catch (Exception ex)
                 {
                     try { transaction.Rollback(); } catch { }
-                    MessageBox.Show("Print/Save failed: " + ex.Message);
+                    // Roll back clears DB; keep PrintClicked snapshot (order id cleared) for retry.
+                    try
+                    {
+                        pending = BuildPendingCheckpoint(PendingSaleStage.PrintClicked, 0);
+                        PendingSaleStore.Save(pending);
+                    }
+                    catch { }
+
+                    MessageBox.Show("Save failed: " + ex.Message);
                     return false;
+                }
+            }
+        }
+
+        private PendingSaleCheckpoint BuildPendingCheckpoint(PendingSaleStage stage, int orderId)
+        {
+            var checkpoint = new PendingSaleCheckpoint
+            {
+                Stage = stage,
+                OrderId = orderId,
+                StartedAtUtc = DateTime.UtcNow,
+                Mobile = txtMobile.Text.Trim(),
+                FirstName = txtName.Text.Trim(),
+                Surname = txtSurname.Text.Trim(),
+                PaymentMethod = cmbPaymentMethod?.Text?.Trim() ?? "Cash",
+                RewardApplied = rewardApplied,
+                RewardDiscountPercent = rewardDiscountPercent,
+                MembershipName = currentMembership ?? "",
+                CurrentCustomerId = currentCustomerId,
+                CurrentCustomerIsStaff = currentCustomerIsStaff,
+                GrandTotal = grandTotal,
+                TotalTaxable = totaltaxableamount,
+                TotalGst = totalgst
+            };
+
+            foreach (DataGridViewRow row in dgvRight.Rows)
+            {
+                if (row.IsNewRow)
+                    continue;
+                if (row.Cells[0].Value == null)
+                    continue;
+
+                checkpoint.Items.Add(new PendingSaleLine
+                {
+                    ItemName = row.Cells[0].Value?.ToString() ?? "",
+                    Discount = GetCellDecimal(row, 1),
+                    Size = row.Cells[2].Value?.ToString() ?? "",
+                    Price = GetCellDecimal(row, 3),
+                    Qty = int.TryParse(row.Cells[4].Value?.ToString(), out int q) ? q : 0,
+                    Gross = GetCellDecimal(row, 5),
+                    Taxable = GetCellDecimal(row, 6),
+                    Gst = GetCellDecimal(row, 7),
+                    Net = GetCellDecimal(row, 8),
+                    GstPercent = GetCellDecimal(row, "GSTPercent"),
+                    ItemCode = row.Cells["Item_Code"].Value?.ToString() ?? "",
+                    ItemId = int.TryParse(row.Cells["Item_Id"].Value?.ToString(), out int id) ? id : 0,
+                    Color = row.Cells["Color"].Value?.ToString() ?? "",
+                    DiscountManual = IsManualDiscountRow(row),
+                    AutoDiscount = GetCellDecimal(row, "Auto_Discount"),
+                    ManualDiscount = GetCellDecimal(row, "Manual_Discount"),
+                    RewardDiscount = GetCellDecimal(row, "Reward_Discount")
+                });
+            }
+
+            return checkpoint;
+        }
+
+        private void RestoreFromPending(PendingSaleCheckpoint pending)
+        {
+            isLoadingHoldBill = true;
+            try
+            {
+                dgvRight.Rows.Clear();
+
+                txtMobile.Text = pending.Mobile ?? "";
+                txtName.Text = pending.FirstName ?? "";
+                txtSurname.Text = pending.Surname ?? "";
+                if (cmbPaymentMethod != null && !string.IsNullOrWhiteSpace(pending.PaymentMethod))
+                {
+                    int idx = cmbPaymentMethod.FindStringExact(pending.PaymentMethod);
+                    if (idx >= 0)
+                        cmbPaymentMethod.SelectedIndex = idx;
+                    else
+                        cmbPaymentMethod.Text = pending.PaymentMethod;
+                }
+
+                rewardApplied = pending.RewardApplied;
+                rewardDiscountPercent = pending.RewardDiscountPercent;
+                currentMembership = pending.MembershipName ?? "";
+                lastRewardMobile = pending.Mobile ?? "";
+                currentCustomerId = pending.CurrentCustomerId;
+                currentCustomerIsStaff = pending.CurrentCustomerIsStaff;
+                lastOrderId = pending.OrderId;
+                grandTotal = pending.GrandTotal;
+                totaltaxableamount = pending.TotalTaxable;
+                totalgst = pending.TotalGst;
+
+                foreach (PendingSaleLine item in pending.Items)
+                {
+                    if (item.Qty <= 0)
+                        continue;
+
+                    dgvRight.Rows.Add(
+                        item.ItemName,
+                        item.Discount,
+                        item.Size,
+                        item.Price,
+                        item.Qty,
+                        item.Gross,
+                        item.Taxable,
+                        item.Gst,
+                        item.Net,
+                        item.GstPercent,
+                        item.ItemCode,
+                        item.ItemId,
+                        item.Color,
+                        item.DiscountManual ? 1 : 0,
+                        item.AutoDiscount,
+                        item.ManualDiscount,
+                        item.RewardDiscount);
+                }
+
+                lblGrandTotal.Text = "Grand Total: " + grandTotal.ToString("0.00");
+                CalculateReturnAmount();
+            }
+            finally
+            {
+                isLoadingHoldBill = false;
+            }
+        }
+
+        private bool OrderExistsInDb(int orderId)
+        {
+            if (orderId <= 0)
+                return false;
+
+            try
+            {
+                using MySqlConnection conn = DB.GetConnection();
+                conn.Open();
+                using MySqlCommand cmd = new MySqlCommand(
+                    "SELECT COUNT(*) FROM inv_orders WHERE id=@id",
+                    conn);
+                cmd.Parameters.AddWithValue("@id", orderId);
+                object? result = cmd.ExecuteScalar();
+                return result != null && Convert.ToInt32(result) > 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Crash recovery for incomplete Print/Save only.
+        /// Pending file is created only after Print click — not while building the cart.
+        /// </summary>
+        private void TryResumePendingSaleOnStartup()
+        {
+            if (pendingResumeChecked)
+                return;
+            pendingResumeChecked = true;
+
+            if (!PendingSaleStore.Exists())
+                return;
+
+            PendingSaleCheckpoint? pending = PendingSaleStore.Load();
+            if (pending == null || pending.Items == null || pending.Items.Count == 0)
+            {
+                if (pending != null)
+                    PendingSaleStore.Clear();
+                return;
+            }
+
+            bool orderInDb = OrderExistsInDb(pending.OrderId);
+
+            string msg;
+            if (orderInDb)
+            {
+                msg =
+                    "Incomplete bill print found.\n\n" +
+                    $"Order ID: {pending.OrderId}\n" +
+                    $"Amount: ₹{pending.GrandTotal:N2}\n" +
+                    $"Stage: saved in DB, print not finished.\n\n" +
+                    "Reprint now?\n\n" +
+                    "Yes = reprint  |  No = discard resume (order already in DB)";
+            }
+            else
+            {
+                msg =
+                    "Incomplete bill found (Print was clicked, save not finished).\n\n" +
+                    $"Items: {pending.Items.Count}\n" +
+                    $"Amount: ₹{pending.GrandTotal:N2}\n\n" +
+                    "Continue save & print now?\n\n" +
+                    "Yes = retry  |  No = discard bill";
+            }
+
+            DialogResult dr = MessageBox.Show(
+                msg,
+                "Resume Bill",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+
+            if (dr != DialogResult.Yes)
+            {
+                PendingSaleStore.Clear();
+                return;
+            }
+
+            RestoreFromPending(pending);
+
+            if (orderInDb)
+            {
+                lastOrderId = pending.OrderId;
+                try
+                {
+                    ConfigureReceiptPaperSize();
+                    PrinterRouting.ApplyReceiptReturnPrinter(printDocument);
+                    if (!printDocument.PrinterSettings.IsValid)
+                    {
+                        MessageBox.Show(
+                            "Order is already saved (ID: " + pending.OrderId +
+                            "), but no valid printer.\nPending kept — fix printer and open Receipt again.");
+                        return;
+                    }
+
+                    pending.Stage = PendingSaleStage.PrintStarted;
+                    PendingSaleStore.Save(pending);
+                    printDocument.Print();
+                    PendingSaleStore.Clear();
+                    MessageBox.Show("Reprint done ✅\nOrder ID: " + pending.OrderId);
+                    ResetBill();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        "Reprint failed: " + ex.Message +
+                        "\nOrder already in DB. Open Receipt again to retry reprint.");
+                }
+            }
+            else
+            {
+                // Not in DB — full save+print retry from restored cart.
+                btnPrint.Enabled = false;
+                try
+                {
+                    bool ok = SaveSaleAndPrint();
+                    if (!ok)
+                    {
+                        MessageBox.Show(
+                            "Resume save/print incomplete. Pending bill kept — try Print again or restart app.");
+                    }
+                }
+                finally
+                {
+                    UpdateActionButtonsState();
                 }
             }
         }
@@ -3213,44 +3574,10 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                             return;
                         }
 
-                        int newQty = availableQty;
-                        row.Cells[4].Value = newQty;
-
-                        // 🔥 IMPORTANT: recalculate after fixing qty
-                        if (!decimal.TryParse(row.Cells[3].Value?.ToString(), out decimal Nprice) ||
-                            !decimal.TryParse(row.Cells["GSTPercent"].Value?.ToString(), out decimal NgstPercent))
-                        {
-                            MessageBox.Show("Price/GST data invalid. Please rescan item.");
-                            return;
-                        }
-
-                        decimal Ndiscount = 0;
-
-                        decimal.TryParse(
-                            row.Cells[1].Value?.ToString(),
-                            out Ndiscount
-                        );
-
-                        CalculateLineAmounts(
-                                            Nprice,
-                                            NgstPercent,
-                                            Ndiscount,
-                                            newQty,
-                                            out decimal Nsubtotal,
-                                            out decimal NgstAmount,
-                                            out decimal Ntotal
-                                        );
-
-                        decimal Ngross = Round2(Nprice * newQty);
-
-                        row.Cells[5].Value = Ngross;      // Gross
-                        row.Cells[6].Value = Nsubtotal;   // Taxable
-                        row.Cells[7].Value = NgstAmount;  // GST
-                        row.Cells[8].Value = Ntotal;      // Net
-
-                        RecalculateTotals();
-
-                        return;
+                        // Cap qty, then use the same discount/amount path as a normal edit
+                        // (manual lock + auto + reward). Do not early-return with stale calc.
+                        qty = availableQty;
+                        row.Cells[4].Value = qty;
                     }
 
                     refreshedAutoDiscount = GetAutoDiscountPercent(conn, itemCode, currentCustomerIsStaff);
@@ -3268,6 +3595,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 decimal rewardDiscount = rewardApplied ? rewardDiscountPercent : GetCellDecimal(row, "Reward_Discount");
 
                 // Mark discount as manual edit if user edited the Discount % column.
+                // Manual % is locked for this item — reward must not override it.
                 if (e.ColumnIndex == 1)
                 {
                     row.Cells["Discount_Manual"].Value = 1;
@@ -3287,25 +3615,35 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                     discount = GetCellDecimal(row, 1);
                 }
 
-                CalculateLineAmounts(
-                    price,
-                    gstPercent,
-                    discount,
-                    qty,
-                    out decimal subtotal,
-                    out decimal gstAmount,
-                    out decimal total
-                );
-
-                decimal gross = Round2(price * qty);
-
-                row.Cells[5].Value = gross;
-                row.Cells[6].Value = subtotal;
-                row.Cells[7].Value = gstAmount;
-                row.Cells[8].Value = total;
-
+                ApplyLineAmountsToRow(row, price, gstPercent, discount, qty);
                 RecalculateTotals();
             }
+        }
+
+        /// <summary>
+        /// Writes gross / taxable / GST / net for one cart row from price, GST%, discount%, qty.
+        /// </summary>
+        private void ApplyLineAmountsToRow(
+            DataGridViewRow row,
+            decimal price,
+            decimal gstPercent,
+            decimal discountPercent,
+            int qty)
+        {
+            CalculateLineAmounts(
+                price,
+                gstPercent,
+                discountPercent,
+                qty,
+                out decimal subtotal,
+                out decimal gstAmount,
+                out decimal total);
+
+            row.Cells[4].Value = qty;
+            row.Cells[5].Value = Round2(price * qty);
+            row.Cells[6].Value = subtotal;
+            row.Cells[7].Value = gstAmount;
+            row.Cells[8].Value = total;
         }
 
         private void BtnReset_Click(object sender, EventArgs e)
@@ -3318,6 +3656,8 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             if (result != DialogResult.Yes)
                 return;
 
+            PendingSaleStore.Clear();
+            lastScanRowIndex = -1;
             dgvRight.Rows.Clear();
             draftScans.Clear();
             UpdateDraftVisibility();
@@ -3348,6 +3688,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
 
         private void ResetBill()
         {
+            lastScanRowIndex = -1;
             dgvRight.Rows.Clear();
 
             grandTotal = 0;
@@ -3378,6 +3719,10 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
 
         private bool ValidateBill()
         {
+            // Always recompute from current lines before save/print checks.
+            RecalculateTotals();
+            EnsureAppliedRewardStillEligible();
+
             int validRowCount = 0;
             foreach (DataGridViewRow row in dgvRight.Rows)
             {
@@ -3549,11 +3894,16 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 if (row.IsNewRow)
                     continue;
 
-                decimal price =
-                    Convert.ToDecimal(row.Cells[3].Value);
+                if (!decimal.TryParse(row.Cells[3].Value?.ToString(), out decimal price) ||
+                    !int.TryParse(row.Cells[4].Value?.ToString(), out int qty) ||
+                    !decimal.TryParse(row.Cells["GSTPercent"].Value?.ToString(), out decimal gstPercent))
+                {
+                    continue;
+                }
 
-                int qty =
-                    Convert.ToInt32(row.Cells[4].Value);
+                // Qty 0 rows are removed in CellEndEdit; skip if any remain.
+                if (qty <= 0)
+                    continue;
 
                 if (IsManualDiscountRow(row))
                 {
@@ -3568,30 +3918,8 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                         rewardApplied ? rewardDiscountPercent : GetCellDecimal(row, "Reward_Discount"));
                 }
 
-                decimal discount =
-                    GetCellDecimal(row, 1);
-
-                decimal gstPercent =
-                    Convert.ToDecimal(
-                        row.Cells["GSTPercent"].Value);
-
-                CalculateLineAmounts(
-                    price,
-                    gstPercent,
-                    discount,
-                    qty,
-                    out decimal taxable,
-                    out decimal gstAmount,
-                    out decimal net);
-
-                decimal gross =
-                    Round2(price * qty);
-
-                // NEW MAPPING
-                row.Cells[5].Value = gross;
-                row.Cells[6].Value = taxable;
-                row.Cells[7].Value = gstAmount;
-                row.Cells[8].Value = net;
+                decimal discount = GetCellDecimal(row, 1);
+                ApplyLineAmountsToRow(row, price, gstPercent, discount, qty);
             }
 
             RecalculateTotals();

@@ -40,6 +40,9 @@ namespace BubbyPlanetShowroom
 
         protected override void OnPaint(PaintEventArgs e)
         {
+            if (Width <= 0 || Height <= 0)
+                return;
+
             if (FillBackground)
                 e.Graphics.Clear(BackColor);
 

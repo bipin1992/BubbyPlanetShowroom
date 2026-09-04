@@ -115,8 +115,9 @@ namespace BubbyPlanetShowroom.Tests
             Assert.Equal(400.00m, result.NewGrossAmount);  // 500/5*4
             Assert.Equal(40.00m, result.NewDiscountAmount);
             Assert.Equal(360.00m, result.NewTaxableAmount);
-            Assert.Equal(64.80m, result.NewGstAmount);     // 81/5*4
-            Assert.Equal(result.Refund + result.NewNetAmount, 531m);
+            Assert.Equal(64.80m, result.NewGstAmount);     // residual of net - taxable
+            Assert.Equal(531m, result.Refund + result.NewNetAmount);
+            Assert.Equal(result.NewNetAmount, result.NewTaxableAmount + result.NewGstAmount);
         }
 
         [Fact]
@@ -336,6 +337,210 @@ namespace BubbyPlanetShowroom.Tests
 
             Assert.Equal(0.00m, net);
             Assert.Equal(original, refunded);
+        }
+
+        // ---------- Fresh bill → multiple return visits ----------
+
+        [Fact]
+        public void FreshBill_ThreeVisits_MultiLine_TotalRefundEqualsOriginalBill()
+        {
+            // Line0: 5 × 200 @12% GST
+            ReturnCalculations.CalculateLineAmounts(200m, 12m, 0m, 5, out var t0, out var g0, out var gr0, out var n0);
+            // Line1: 2 × 450 @18% GST, 10% disc
+            ReturnCalculations.CalculateLineAmounts(450m, 18m, 10m, 2, out var t1, out var g1, out var gr1, out var n1);
+            // Line2: 3 × 99.99 @5% GST
+            ReturnCalculations.CalculateLineAmounts(99.99m, 5m, 0m, 3, out var t2, out var g2, out var gr2, out var n2);
+
+            var lines = new[]
+            {
+                new LineState(5, gr0, ReturnCalculations.Round2(gr0 - n0), t0, g0, n0, 0),
+                new LineState(2, gr1, ReturnCalculations.Round2(gr1 - n1), t1, g1, n1, 0),
+                new LineState(3, gr2, ReturnCalculations.Round2(gr2 - n2), t2, g2, n2, 0),
+            };
+
+            decimal originalBill = n0 + n1 + n2;
+            decimal totalRefund = 0m;
+
+            // Visit 1: return 2 from L0, 1 from L1
+            totalRefund += ApplyVisit(lines, new[] { (0, 2), (1, 1) });
+            AssertBillInvariant(lines, originalBill, totalRefund);
+
+            // Visit 2: return 1 from L0, 2 from L2
+            totalRefund += ApplyVisit(lines, new[] { (0, 1), (2, 2) });
+            AssertBillInvariant(lines, originalBill, totalRefund);
+
+            // Visit 3: finish remaining
+            totalRefund += ApplyVisit(lines, new[] { (0, 2), (1, 1), (2, 1) });
+            AssertBillInvariant(lines, originalBill, totalRefund);
+
+            Assert.Equal(0.00m, lines[0].Net + lines[1].Net + lines[2].Net);
+            Assert.Equal(originalBill, totalRefund);
+            Assert.Equal(5, lines[0].Returned);
+            Assert.Equal(2, lines[1].Returned);
+            Assert.Equal(3, lines[2].Returned);
+        }
+
+        [Fact]
+        public void PartialReturns_TaxablePlusGstAlwaysEqualsNet()
+        {
+            ReturnCalculations.CalculateLineAmounts(500m, 12m, 10m, 4, out var taxable, out var gst, out var gross, out var net);
+            decimal disc = ReturnCalculations.Round2(gross - net);
+            int returned = 0;
+
+            foreach (int step in new[] { 1, 1, 2 })
+            {
+                var r = ReturnCalculations.ApplyReturn(4, returned, step, gross, disc, taxable, gst, net);
+                returned = r.NewReturnQty;
+                gross = r.NewGrossAmount;
+                disc = r.NewDiscountAmount;
+                taxable = r.NewTaxableAmount;
+                gst = r.NewGstAmount;
+                net = r.NewNetAmount;
+
+                Assert.Equal(net, ReturnCalculations.Round2(taxable + gst));
+            }
+
+            Assert.Equal(0.00m, net);
+        }
+
+        [Fact]
+        public void AwkwardSevenUnits_EachStep_NoTaxNetMismatch_AndFullRefund()
+        {
+            ReturnCalculations.CalculateLineAmounts(999.99m, 5m, 7.5m, 7, out var taxable, out var gst, out var gross, out var net);
+            decimal disc = ReturnCalculations.Round2(gross - net);
+            decimal original = net;
+            decimal refunded = 0m;
+            int returned = 0;
+
+            for (int i = 0; i < 7; i++)
+            {
+                decimal preview = ReturnCalculations.CalculateLineRefund(7, returned, net, 1);
+                var r = ReturnCalculations.ApplyReturn(7, returned, 1, gross, disc, taxable, gst, net);
+                Assert.Equal(preview, r.Refund);
+
+                refunded += r.Refund;
+                returned = r.NewReturnQty;
+                gross = r.NewGrossAmount;
+                disc = r.NewDiscountAmount;
+                taxable = r.NewTaxableAmount;
+                gst = r.NewGstAmount;
+                net = r.NewNetAmount;
+
+                Assert.Equal(net, ReturnCalculations.Round2(taxable + gst));
+                Assert.Equal(original, ReturnCalculations.Round2(refunded + net));
+            }
+
+            Assert.Equal(0.00m, net);
+            Assert.Equal(original, refunded);
+        }
+
+        [Theory]
+        [InlineData(500, 500, 0, 0, true)]
+        [InlineData(500, 600, 100, 0, true)]
+        [InlineData(500, 499.99, 0, 0.01, false)]
+        public void Exchange_EqualOrMoreRule(decimal ret, decimal neu, decimal balance, decimal shortfall, bool ok)
+        {
+            var ex = ReturnCalculations.CalculateExchange(ret, neu);
+            Assert.Equal(balance, ex.BalanceDue);
+            Assert.Equal(shortfall, ex.Shortfall);
+            Assert.Equal(ok, ex.MeetsEqualOrMoreRule);
+        }
+
+        [Fact]
+        public void T99Return_T399Exchange_15Percent_ExtraIs255()
+        {
+            ReturnCalculations.CalculateLineAmounts(99m, 0m, 15m, 1, out _, out _, out _, out decimal t99Net);
+            ReturnCalculations.CalculateLineAmounts(399m, 0m, 15m, 1, out _, out _, out _, out decimal t399Net);
+
+            Assert.Equal(84.15m, t99Net);
+            Assert.Equal(339.15m, t399Net);
+
+            var exchange = ReturnCalculations.CalculateExchange(t99Net, t399Net);
+            Assert.Equal(255.00m, exchange.BalanceDue);
+            Assert.True(exchange.MeetsEqualOrMoreRule);
+        }
+
+        [Fact]
+        public void ExchangeThenReturnExchangeLine_PreservesValues()
+        {
+            // Original line partially returned
+            var sold = ReturnCalculations.ApplyReturn(3, 0, 1, 300m, 0m, 300m, 0m, 300m);
+            Assert.Equal(100.00m, sold.Refund);
+            Assert.Equal(200.00m, sold.NewNetAmount);
+
+            // Exchange adds new line net 150 (equal-or-more vs return 100)
+            var ex = ReturnCalculations.CalculateExchange(sold.Refund, 150m);
+            Assert.True(ex.MeetsEqualOrMoreRule);
+            Assert.Equal(50.00m, ex.BalanceDue);
+
+            // Later visit: return the exchange item fully
+            var back = ReturnCalculations.ApplyReturn(1, 0, 1, 150m, 0m, 150m, 0m, 150m);
+            Assert.Equal(150.00m, back.Refund);
+            Assert.Equal(0.00m, back.NewNetAmount);
+        }
+
+        private sealed class LineState
+        {
+            public LineState(int qty, decimal gross, decimal disc, decimal taxable, decimal gst, decimal net, int returned)
+            {
+                Qty = qty;
+                Gross = gross;
+                Disc = disc;
+                Taxable = taxable;
+                Gst = gst;
+                Net = net;
+                Returned = returned;
+            }
+
+            public int Qty { get; }
+            public decimal Gross { get; set; }
+            public decimal Disc { get; set; }
+            public decimal Taxable { get; set; }
+            public decimal Gst { get; set; }
+            public decimal Net { get; set; }
+            public int Returned { get; set; }
+        }
+
+        private static decimal ApplyVisit(LineState[] lines, (int Index, int Qty)[] returns)
+        {
+            decimal visitRefund = 0m;
+            foreach ((int index, int qty) in returns)
+            {
+                LineState line = lines[index];
+                var r = ReturnCalculations.ApplyReturn(
+                    line.Qty, line.Returned, qty,
+                    line.Gross, line.Disc, line.Taxable, line.Gst, line.Net);
+
+                visitRefund += r.Refund;
+                line.Returned = r.NewReturnQty;
+                line.Gross = r.NewGrossAmount;
+                line.Disc = r.NewDiscountAmount;
+                line.Taxable = r.NewTaxableAmount;
+                line.Gst = r.NewGstAmount;
+                line.Net = r.NewNetAmount;
+
+                Assert.Equal(line.Net, ReturnCalculations.Round2(line.Taxable + line.Gst));
+            }
+
+            return visitRefund;
+        }
+
+        private static void AssertBillInvariant(LineState[] lines, decimal originalBill, decimal totalRefund)
+        {
+            decimal remaining = 0m;
+            decimal orderSubtotal = 0m;
+            decimal orderTax = 0m;
+            decimal orderGrand = 0m;
+            foreach (LineState line in lines)
+            {
+                remaining += line.Net;
+                orderSubtotal += line.Taxable;
+                orderTax += line.Gst;
+                orderGrand += line.Net;
+            }
+
+            Assert.Equal(originalBill, ReturnCalculations.Round2(totalRefund + remaining));
+            Assert.Equal(ReturnCalculations.Round2(orderGrand), ReturnCalculations.Round2(orderSubtotal + orderTax));
         }
     }
 }

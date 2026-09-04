@@ -149,6 +149,7 @@ CREATE TABLE IF NOT EXISTS daily_cash_closing
 
             EnsureColumnExists(conn, "daily_cash_closing", "cash_in_reason", "VARCHAR(300) NULL");
             EnsureColumnExists(conn, "daily_cash_closing", "cash_out_reason", "VARCHAR(300) NULL");
+            EnsureColumnExists(conn, "daily_cash_closing", "is_shop_closed", "TINYINT(1) NOT NULL DEFAULT 0");
 
             string createMovements = @"
 CREATE TABLE IF NOT EXISTS daily_cash_movements
@@ -171,6 +172,122 @@ CREATE TABLE IF NOT EXISTS daily_cash_movements
             using (MySqlCommand movementCmd = new MySqlCommand(createMovements, conn))
             {
                 movementCmd.ExecuteNonQuery();
+            }
+        }
+
+        /// <summary>
+        /// Cash/Online money movement for returns (refund out) and exchanges (balance collect in).
+        /// Used by Closing Balance so counter cash reflects Cash settlements.
+        /// </summary>
+        public static void EnsureReturnSettlementSchema(MySqlConnection conn)
+        {
+            string create = @"
+CREATE TABLE IF NOT EXISTS inv_return_settlements
+(
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    order_id INT NOT NULL,
+    settlement_type VARCHAR(20) NOT NULL,
+    payment_method VARCHAR(40) NOT NULL,
+    amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX ix_return_settlements_order (order_id),
+    INDEX ix_return_settlements_date_method (created_at, payment_method, settlement_type)
+);";
+            using (MySqlCommand cmd = new MySqlCommand(create, conn))
+            {
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        public static void EnsurePricingSchema(MySqlConnection conn)
+        {
+            string createSettings = @"
+CREATE TABLE IF NOT EXISTS pricing_settings
+(
+    id INT NOT NULL PRIMARY KEY,
+    monthly_rent DECIMAL(12,2) NOT NULL DEFAULT 30000.00,
+    monthly_salary DECIMAL(12,2) NOT NULL DEFAULT 30000.00,
+    expected_monthly_sales DECIMAL(12,2) NOT NULL DEFAULT 3000.00,
+    discount_percent DECIMAL(6,2) NOT NULL DEFAULT 0.00,
+    price_ending_digit TINYINT NOT NULL DEFAULT 9,
+    total_transport_cost DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    total_parcel_quantity INT NOT NULL DEFAULT 1,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);";
+            using (MySqlCommand cmd = new MySqlCommand(createSettings, conn))
+                cmd.ExecuteNonQuery();
+
+            EnsureColumnExists(conn, "pricing_settings", "total_transport_cost", "DECIMAL(12,2) NOT NULL DEFAULT 0.00");
+            EnsureColumnExists(conn, "pricing_settings", "total_parcel_quantity", "INT NOT NULL DEFAULT 1");
+
+            using (MySqlCommand seed = new MySqlCommand(
+                @"INSERT IGNORE INTO pricing_settings
+                    (id, monthly_rent, monthly_salary, expected_monthly_sales, discount_percent, price_ending_digit,
+                     total_transport_cost, total_parcel_quantity)
+                  VALUES
+                    (1, 30000.00, 30000.00, 3000.00, 0.00, 9, 0.00, 1)",
+                conn))
+            {
+                seed.ExecuteNonQuery();
+            }
+
+            using (MySqlCommand clearUnused = new MySqlCommand(
+                @"UPDATE pricing_settings
+                  SET discount_percent = 0,
+                      total_transport_cost = 0,
+                      total_parcel_quantity = 1
+                  WHERE discount_percent <> 0
+                     OR total_transport_cost <> 0
+                     OR total_parcel_quantity <> 1",
+                conn))
+            {
+                clearUnused.ExecuteNonQuery();
+            }
+
+            string createSlabs = @"
+CREATE TABLE IF NOT EXISTS pricing_profit_slabs
+(
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    min_purchase_cost DECIMAL(12,2) NOT NULL DEFAULT 0,
+    max_purchase_cost DECIMAL(12,2) NULL,
+    margin_percent DECIMAL(6,2) NOT NULL DEFAULT 0,
+    sort_order INT NOT NULL DEFAULT 0,
+    INDEX ix_pricing_profit_slabs_sort (sort_order, min_purchase_cost)
+);";
+            using (MySqlCommand cmd = new MySqlCommand(createSlabs, conn))
+                cmd.ExecuteNonQuery();
+
+            using (MySqlCommand countCmd = new MySqlCommand("SELECT COUNT(*) FROM pricing_profit_slabs", conn))
+            {
+                long count = Convert.ToInt64(countCmd.ExecuteScalar() ?? 0);
+                if (count == 0)
+                {
+                    using MySqlCommand cmd = new MySqlCommand(
+                        @"INSERT INTO pricing_profit_slabs (min_purchase_cost, max_purchase_cost, margin_percent, sort_order)
+                          VALUES
+                            (0,    500,  45, 0),
+                            (500,  1000, 40, 1),
+                            (1000, 1500, 35, 2),
+                            (1500, 2000, 30, 3),
+                            (2000, NULL, 25, 4)",
+                        conn);
+                    cmd.ExecuteNonQuery();
+                    return;
+                }
+            }
+
+            string[] slabUpdates =
+            {
+                "UPDATE pricing_profit_slabs SET margin_percent = 45 WHERE min_purchase_cost = 0 AND max_purchase_cost = 500",
+                "UPDATE pricing_profit_slabs SET margin_percent = 40 WHERE min_purchase_cost = 500 AND max_purchase_cost = 1000",
+                "UPDATE pricing_profit_slabs SET margin_percent = 35 WHERE min_purchase_cost = 1000 AND max_purchase_cost = 1500",
+                "UPDATE pricing_profit_slabs SET margin_percent = 30 WHERE min_purchase_cost = 1500 AND max_purchase_cost = 2000",
+                "UPDATE pricing_profit_slabs SET margin_percent = 25 WHERE min_purchase_cost = 2000 AND max_purchase_cost IS NULL"
+            };
+            foreach (string sql in slabUpdates)
+            {
+                using MySqlCommand updateSlabs = new MySqlCommand(sql, conn);
+                updateSlabs.ExecuteNonQuery();
             }
         }
 

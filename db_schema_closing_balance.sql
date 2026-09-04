@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS daily_cash_closing
     difference_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
 
     note VARCHAR(500) NULL,
+    is_shop_closed TINYINT(1) NOT NULL DEFAULT 0,
     created_by_user VARCHAR(100) NOT NULL,
     created_by_role VARCHAR(50) NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
