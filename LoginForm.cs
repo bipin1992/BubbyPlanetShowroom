@@ -266,6 +266,7 @@ namespace BubbyPlanetShowroom
             StyleTextBox(txtUsername, usernameWrap);
             txtUsername.PlaceholderText = "Enter username";
             txtUsername.TabIndex = 0;
+            txtUsername.TabStop = true;
             y += 56;
 
             label2 = MakeFieldLabel("PASSWORD", x, y);
@@ -275,13 +276,15 @@ namespace BubbyPlanetShowroom
             txtPassword.PlaceholderText = "Enter password";
             txtPassword.UseSystemPasswordChar = true;
             txtPassword.TabIndex = 1;
+            txtPassword.TabStop = true;
 
             chkShowPassword.Text = "Show password";
             chkShowPassword.Font = new Font("Segoe UI", 9f);
             chkShowPassword.ForeColor = Muted;
             chkShowPassword.AutoSize = true;
             chkShowPassword.Location = new Point(x, y + 42);
-            chkShowPassword.TabIndex = 2;
+            chkShowPassword.TabStop = false;
+            chkShowPassword.TabIndex = 10;
             chkShowPassword.Cursor = Cursors.Hand;
             chkShowPassword.BackColor = Color.White;
             chkShowPassword.CheckedChanged += chkShowPassword_CheckedChanged;
@@ -296,7 +299,8 @@ namespace BubbyPlanetShowroom
             cmbRole.Dock = DockStyle.Fill;
             cmbRole.Font = new Font("Segoe UI", 10.5f);
             cmbRole.FlatStyle = FlatStyle.Flat;
-            cmbRole.TabIndex = 3;
+            cmbRole.TabIndex = 2;
+            cmbRole.TabStop = true;
             roleWrap.Controls.Add(cmbRole);
             y += 56;
 
@@ -309,7 +313,8 @@ namespace BubbyPlanetShowroom
             btnLogin.FlatAppearance.BorderSize = 0;
             btnLogin.Font = new Font("Segoe UI", 11.5f, FontStyle.Bold);
             btnLogin.Cursor = Cursors.Hand;
-            btnLogin.TabIndex = 4;
+            btnLogin.TabIndex = 3;
+            btnLogin.TabStop = true;
             btnLogin.UseVisualStyleBackColor = false;
             btnLogin.Click += btnLogin_Click;
 
@@ -330,6 +335,13 @@ namespace BubbyPlanetShowroom
             formPanel.Controls.Add(cardPanel);
             Controls.Add(formPanel);
             Controls.Add(brandPanel);
+
+            usernameWrap.TabStop = false;
+            passwordWrap.TabStop = false;
+            roleWrap.TabStop = false;
+            formPanel.TabStop = false;
+            brandPanel.TabStop = false;
+            cardPanel.TabStop = false;
 
             ResumeLayout(false);
         }

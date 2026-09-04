@@ -447,6 +447,20 @@ namespace BubbyPlanetShowroom.Tests
         }
 
         [Fact]
+        public void T99Return_T399Exchange_15Percent_ExtraIs255()
+        {
+            ReturnCalculations.CalculateLineAmounts(99m, 0m, 15m, 1, out _, out _, out _, out decimal t99Net);
+            ReturnCalculations.CalculateLineAmounts(399m, 0m, 15m, 1, out _, out _, out _, out decimal t399Net);
+
+            Assert.Equal(84.15m, t99Net);
+            Assert.Equal(339.15m, t399Net);
+
+            var exchange = ReturnCalculations.CalculateExchange(t99Net, t399Net);
+            Assert.Equal(255.00m, exchange.BalanceDue);
+            Assert.True(exchange.MeetsEqualOrMoreRule);
+        }
+
+        [Fact]
         public void ExchangeThenReturnExchangeLine_PreservesValues()
         {
             // Original line partially returned

@@ -107,6 +107,11 @@ namespace BubbyPlanetShowroom
 
         private bool isLoadingHoldBill = false;
         private bool pendingResumeChecked = false;
+        private int lastScanRowIndex = -1;
+        private bool lastScanQtyOnly;
+        private static readonly Color ScanNewRowColor = Color.FromArgb(167, 243, 208);
+        private static readonly Color ScanQtyCellColor = Color.FromArgb(250, 204, 21);
+        private static readonly Color ScanQtyRowTint = Color.FromArgb(254, 249, 195);
         private string currentMembership = "";
         private TextBox txtPaidAmount;
         private TextBox txtBillAmount;
@@ -996,9 +1001,12 @@ namespace BubbyPlanetShowroom
             rightPanel.Controls.Add(lstHoldBills);
 
             dgvRight.CellEndEdit += DgvRight_CellEndEdit;
+            dgvRight.CellFormatting += DgvRight_LastScanCellFormatting;
             dgvRight.RowsAdded += (s, e) => UpdateActionButtonsState();
             dgvRight.RowsRemoved += (s, e) =>
             {
+                if (lastScanRowIndex >= dgvRight.Rows.Count)
+                    lastScanRowIndex = -1;
                 UpdateActionButtonsState();
                 // Delete key removes rows without CellEndEdit — must refresh totals
                 // or saved/printed grand_total stays stale (overcharge).
@@ -1909,6 +1917,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
 
                     existingRow.Cells["Item_Id"].Value = itemId;
                     existingRow.Cells["Color"].Value = color;
+                    HighlightLastScan(existingRow, qtyOnly: true);
                 }
                 else
                 {
@@ -1942,12 +1951,42 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                         0,
                         currentRewardDiscount
                     );
+                    HighlightLastScan(dgvRight.Rows[dgvRight.Rows.Count - 1], qtyOnly: false);
                 }
 
                 RecalculateTotals();
             }
 
             return true;
+        }
+
+        private void HighlightLastScan(DataGridViewRow row, bool qtyOnly)
+        {
+            if (row == null || row.Index < 0)
+                return;
+
+            int previous = lastScanRowIndex;
+            lastScanRowIndex = row.Index;
+            lastScanQtyOnly = qtyOnly;
+
+            if (previous >= 0 && previous < dgvRight.Rows.Count)
+                dgvRight.InvalidateRow(previous);
+            dgvRight.InvalidateRow(row.Index);
+        }
+
+        private void DgvRight_LastScanCellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.RowIndex != lastScanRowIndex)
+                return;
+
+            Color fill = lastScanQtyOnly && e.ColumnIndex == 4
+                ? ScanQtyCellColor
+                : lastScanQtyOnly
+                    ? ScanQtyRowTint
+                    : ScanNewRowColor;
+
+            e.CellStyle.BackColor = fill;
+            e.CellStyle.SelectionBackColor = fill;
         }
 
         private int GetAgeMonths(DateTime addedOn, DateTime now)
@@ -2756,6 +2795,8 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                     PendingSaleStore.Save(pending);
 
                     transaction.Commit();
+
+                    ClosingCashStore.SyncTodaysSavedClosing();
 
                     pending.Stage = PendingSaleStage.PrintStarted;
                     PendingSaleStore.Save(pending);
@@ -3616,6 +3657,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 return;
 
             PendingSaleStore.Clear();
+            lastScanRowIndex = -1;
             dgvRight.Rows.Clear();
             draftScans.Clear();
             UpdateDraftVisibility();
@@ -3646,6 +3688,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
 
         private void ResetBill()
         {
+            lastScanRowIndex = -1;
             dgvRight.Rows.Clear();
 
             grandTotal = 0;

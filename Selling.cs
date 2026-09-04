@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -213,7 +214,7 @@ namespace BubbyPlanetShowroom
             dgvOrders.Columns.Add("RowKind", "RowKind");
             dgvOrders.Columns["RowKind"].Visible = false;
             dgvOrders.SelectionChanged += DgvOrders_SelectionChanged;
-            Panel ordersHeaderBar = CreateSectionHeader("ORDERS", "Return extra income is listed as a separate row");
+            Panel ordersHeaderBar = CreateSectionHeader("ORDERS", "Return extra ke baad T99 sale nahi — Total Sale sirf extra");
             ordersCard.Controls.Add(dgvOrders);
             ordersCard.Controls.Add(ordersHeaderBar);
 
@@ -391,10 +392,12 @@ namespace BubbyPlanetShowroom
                         extraWhere += " AND o.created_by=@user";
                     }
 
+                    string orderSaleWhere = orderWhere + ExtraOrderExcludeClause();
+
                     decimal orderSale = 0;
                     int orderCount = 0;
                     using (MySqlCommand cmd = new MySqlCommand(
-                        @"SELECT COUNT(*) TotalOrders, IFNULL(SUM(grand_total),0) TotalSale
+                        @"SELECT COUNT(*) TotalOrders
                           FROM inv_orders o
                           WHERE " + orderWhere,
                         conn))
@@ -403,12 +406,26 @@ namespace BubbyPlanetShowroom
                         if (cmbUser.Text != "All Users")
                             cmd.Parameters.AddWithValue("@user", cmbUser.Text);
 
-                        using MySqlDataReader reader = cmd.ExecuteReader();
-                        if (reader.Read())
-                        {
-                            orderCount = Convert.ToInt32(reader["TotalOrders"]);
-                            orderSale = Convert.ToDecimal(reader["TotalSale"]);
-                        }
+                        object countValue = cmd.ExecuteScalar();
+                        orderCount = countValue == null || countValue == DBNull.Value
+                            ? 0
+                            : Convert.ToInt32(countValue);
+                    }
+
+                    using (MySqlCommand cmd = new MySqlCommand(
+                        @"SELECT IFNULL(SUM(grand_total),0)
+                          FROM inv_orders o
+                          WHERE " + orderSaleWhere,
+                        conn))
+                    {
+                        AddPeriodParams(cmd);
+                        if (cmbUser.Text != "All Users")
+                            cmd.Parameters.AddWithValue("@user", cmbUser.Text);
+
+                        object saleValue = cmd.ExecuteScalar();
+                        orderSale = saleValue == null || saleValue == DBNull.Value
+                            ? 0
+                            : Convert.ToDecimal(saleValue);
                     }
 
                     decimal extraSale = 0;
@@ -428,7 +445,7 @@ namespace BubbyPlanetShowroom
                     }
 
                     lblTodayOrders.Text = "Orders : " + orderCount;
-                    lblTodaySale.Text = "Sale : ₹" + (orderSale + extraSale).ToString("N2");
+                    lblTodaySale.Text = "Sale : ₹" + SellingCalculations.CombineTotalSale(orderSale, extraSale).ToString("N2");
                 }
             }
             catch (Exception ex)
@@ -451,6 +468,8 @@ namespace BubbyPlanetShowroom
                     string extraWhere = GetExchangeExtraWhere();
                     if (cmbUser.Text != "All Users")
                         extraWhere += " AND o.created_by=@user";
+
+                    HashSet<int> extraOrderIds = new HashSet<int>();
 
                     using (MySqlCommand cmd = new MySqlCommand(
                         @"SELECT
@@ -476,8 +495,10 @@ namespace BubbyPlanetShowroom
                         using MySqlDataReader reader = cmd.ExecuteReader();
                         while (reader.Read())
                         {
+                            int extraOrderId = Convert.ToInt32(reader["order_id"]);
+                            extraOrderIds.Add(extraOrderId);
                             dgvOrders.Rows.Add(
-                                reader["order_id"],
+                                extraOrderId,
                                 "Return extra income",
                                 Convert.ToDateTime(reader["created_at"]).ToString("dd-MM-yyyy HH:mm"),
                                 (reader["first_name"]?.ToString() + " " + reader["sur_name"]?.ToString()).Trim(),
@@ -516,8 +537,12 @@ namespace BubbyPlanetShowroom
                         using MySqlDataReader reader = cmd.ExecuteReader();
                         while (reader.Read())
                         {
+                            int saleOrderId = Convert.ToInt32(reader["id"]);
+                            if (!SellingCalculations.IncludeOrderSaleInTotal(extraOrderIds.Contains(saleOrderId)))
+                                continue;
+
                             dgvOrders.Rows.Add(
-                                reader["id"],
+                                saleOrderId,
                                 "Sale",
                                 Convert.ToDateTime(reader["date_added"]).ToString("dd-MM-yyyy HH:mm"),
                                 (reader["first_name"]?.ToString() + " " + reader["sur_name"]?.ToString()).Trim(),
@@ -547,33 +572,7 @@ namespace BubbyPlanetShowroom
                 Convert.ToInt32(
                     dgvOrders.CurrentRow.Cells["OrderId"].Value);
 
-            string rowKind = dgvOrders.CurrentRow.Cells["RowKind"].Value?.ToString() ?? "Sale";
-            if (string.Equals(rowKind, "ReturnExtra", StringComparison.OrdinalIgnoreCase))
-            {
-                LoadExchangeExtraDetail(dgvOrders.CurrentRow);
-                return;
-            }
-
             LoadOrderDetails(orderId);
-        }
-
-        private void LoadExchangeExtraDetail(DataGridViewRow row)
-        {
-            dgvDetails.Rows.Clear();
-            string amountText = row.Cells["Amount"].Value?.ToString() ?? "0";
-            dgvDetails.Rows.Add(
-                "Return extra income (bill #" + row.Cells["OrderId"].Value + ")",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                amountText);
         }
 
         private void LoadOrderDetails(int orderId)
@@ -717,6 +716,17 @@ namespace BubbyPlanetShowroom
 
             cmd.Parameters.AddWithValue("@fromDate", from);
             cmd.Parameters.AddWithValue("@toDate", to);
+        }
+
+        private string ExtraOrderExcludeClause()
+        {
+            return @"
+                  AND o.id NOT IN (
+                      SELECT s.order_id
+                      FROM inv_return_settlements s
+                      WHERE LOWER(TRIM(s.settlement_type)) = 'collect'
+                        AND " + GetDateCondition("s.created_at") + @"
+                  )";
         }
 
         private string GetExchangeExtraWhere()

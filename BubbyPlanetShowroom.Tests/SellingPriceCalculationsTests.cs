@@ -138,6 +138,28 @@ namespace BubbyPlanetShowroom.Tests
         }
 
         [Fact]
+        public void Calculate_UserExample_Transport26_Qty5_Rate455()
+        {
+            SellingPriceResult result = SellingPriceCalculations.Calculate(
+                perPieceRate: 455m,
+                quantity: 5,
+                settings: ExampleSettings(),
+                itemTransportCost: 26m);
+
+            Assert.Equal(455.00m, result.PurchaseCostPerPiece);
+            Assert.Equal(5.20m, result.TransportPerPiece);
+            Assert.Equal(45m, result.ProfitMarginPercent);
+            Assert.Equal(204.75m, result.ProfitPerPiece);
+            Assert.Equal(684.95m, result.RequiredNetPrice);
+            Assert.Equal(684.95m, result.PriceBeforeRounding);
+            Assert.Equal(689m, result.FinalSellingPrice);
+            Assert.Equal(0m, result.DiscountAmount);
+            Assert.Equal(689m, result.CustomerPayable);
+            Assert.Equal(480.20m, result.ActualTotalCost);
+            Assert.Equal(208.80m, result.ActualProfit);
+        }
+
+        [Fact]
         public void Calculate_RejectsZeroQuantity()
         {
             Assert.Throws<ArgumentOutOfRangeException>(() =>

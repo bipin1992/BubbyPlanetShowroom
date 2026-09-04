@@ -164,7 +164,7 @@ namespace BubbyPlanetShowroom
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 112f)); // summary
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 10f));  // gap
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));  // grids
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 130f)); // footer calc + action
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 136f)); // footer calc + action
             Controls.Add(root);
 
             // ----- Page header -----
@@ -382,12 +382,18 @@ namespace BubbyPlanetShowroom
             bottomPanel.Margin = new Padding(0);
             bottomPanel.Padding = new Padding(12, 10, 12, 10);
 
+            Panel processHost = new Panel
+            {
+                Dock = DockStyle.Right,
+                Width = 196,
+                BackColor = Color.White,
+                Padding = new Padding(8, 0, 8, 0)
+            };
+
             Panel calcPanel = new Panel
             {
-                Left = 12,
-                Top = 8,
-                Width = 560,
-                Height = 118,
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0),
                 BackColor = Color.FromArgb(248, 250, 252),
                 Padding = new Padding(10)
             };
@@ -419,22 +425,22 @@ namespace BubbyPlanetShowroom
             lblCalcHint.Text = "Pure return = refund  ·  Exchange = same bill, pay only extra";
             lblCalcHint.Font = new Font("Segoe UI", 8f);
             lblCalcHint.ForeColor = MutedText;
-            lblCalcHint.Location = new Point(250, 8);
-            lblCalcHint.Size = new Size(180, 55);
+            lblCalcHint.AutoSize = true;
+            lblCalcHint.Location = new Point(320, 8);
 
             lblPaymentMethod.Text = "Payment:";
             lblPaymentMethod.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
             lblPaymentMethod.ForeColor = Slate;
-            lblPaymentMethod.Location = new Point(250, 68);
             lblPaymentMethod.AutoSize = true;
+            lblPaymentMethod.Location = new Point(10, 64);
             lblPaymentMethod.Visible = false;
 
             cmbPaymentMethod.DropDownStyle = ComboBoxStyle.DropDownList;
             cmbPaymentMethod.Items.AddRange(new object[] { "Cash", "Online" });
             cmbPaymentMethod.SelectedIndex = 0;
-            cmbPaymentMethod.Location = new Point(320, 64);
-            cmbPaymentMethod.Size = new Size(110, 28);
+            cmbPaymentMethod.Size = new Size(120, 28);
             cmbPaymentMethod.Font = new Font("Segoe UI", 9.5f);
+            cmbPaymentMethod.Location = new Point(118, 60);
             cmbPaymentMethod.Visible = false;
 
             calcPanel.Controls.Add(lblCalcReturn);
@@ -443,18 +449,20 @@ namespace BubbyPlanetShowroom
             calcPanel.Controls.Add(lblCalcHint);
             calcPanel.Controls.Add(lblPaymentMethod);
             calcPanel.Controls.Add(cmbPaymentMethod);
+            calcPanel.Resize += (_, _) => LayoutReturnFooterControls(calcPanel);
 
             StyleButton(btnProcess, "Process", DisabledButtonColor, 180, 44);
             btnProcess.Enabled = false;
             btnProcess.Click += BtnProcess_Click;
-            bottomPanel.Resize += (s, e) =>
+            processHost.Resize += (_, _) =>
             {
-                btnProcess.Left = Math.Max(16, bottomPanel.ClientSize.Width - btnProcess.Width - 16);
-                btnProcess.Top = 40;
+                btnProcess.Left = Math.Max(0, (processHost.ClientSize.Width - btnProcess.Width) / 2);
+                btnProcess.Top = Math.Max(8, (processHost.ClientSize.Height - btnProcess.Height) / 2);
             };
+            processHost.Controls.Add(btnProcess);
 
             bottomPanel.Controls.Add(calcPanel);
-            bottomPanel.Controls.Add(btnProcess);
+            bottomPanel.Controls.Add(processHost);
 
             Panel Gap() => new Panel { Dock = DockStyle.Fill, BackColor = PageBg, Margin = new Padding(0) };
 
@@ -470,8 +478,7 @@ namespace BubbyPlanetShowroom
             txtOrderId.TextChanged += TxtOrderId_TextChanged;
             Load += (s, e) =>
             {
-                btnProcess.Left = Math.Max(16, bottomPanel.ClientSize.Width - btnProcess.Width - 16);
-                btnProcess.Top = 40;
+                LayoutReturnFooterControls(calcPanel);
                 BeginInvoke(new Action(TryResumePendingReturnOnStartup));
                 txtOrderId.Focus();
             };
@@ -977,6 +984,7 @@ namespace BubbyPlanetShowroom
             if (!needPayment)
             {
                 lblPaymentMethod.Text = "Payment:";
+                LayoutReturnFooterControls(cmbPaymentMethod.Parent);
                 return;
             }
 
@@ -987,6 +995,30 @@ namespace BubbyPlanetShowroom
 
             if (cmbPaymentMethod.SelectedIndex < 0)
                 cmbPaymentMethod.SelectedIndex = 0;
+
+            LayoutReturnFooterControls(cmbPaymentMethod.Parent);
+        }
+
+        private void LayoutReturnFooterControls(Control? calcPanel)
+        {
+            if (calcPanel == null)
+                return;
+
+            int right = calcPanel.ClientSize.Width - 12;
+            if (right < 140)
+                return;
+
+            lblCalcHint.MaximumSize = new Size(Math.Max(160, right - 240), 0);
+            lblCalcHint.Left = Math.Max(lblCalcNew.Right + 16, right - Math.Max(lblCalcHint.Width, 160));
+            lblCalcHint.Top = 8;
+
+            cmbPaymentMethod.Width = 120;
+            cmbPaymentMethod.Left = right - cmbPaymentMethod.Width;
+            cmbPaymentMethod.Top = 58;
+
+            lblPaymentMethod.AutoSize = true;
+            lblPaymentMethod.Left = Math.Max(10, cmbPaymentMethod.Left - lblPaymentMethod.Width - 8);
+            lblPaymentMethod.Top = 62;
         }
 
         private string GetSelectedPaymentMethod()
@@ -1990,6 +2022,7 @@ namespace BubbyPlanetShowroom
 
                         transaction.Commit();
                         returnCompleted = true;
+                        ClosingCashStore.SyncTodaysSavedClosing();
 
                         if (isExchange)
                         {
