@@ -69,6 +69,20 @@ namespace BubbyPlanetShowroom.Tests
         }
 
         [Fact]
+        public void Order1211_OnlineExtraOnCashBill_DrawerKeepsOriginal169()
+        {
+            decimal onlineExtra = ClosingCashCalculations.SettlementEffectOnDrawer(
+                "collect", "Online", 85m, Today, Today, "Cash");
+
+            Assert.Equal(-85m, onlineExtra);
+            Assert.Equal(169.15m, ClosingCashCalculations.CombineCashFromDb(254.15m, onlineExtra));
+            Assert.Equal(0m, ClosingCashCalculations.CountableCashOut(
+                new[] { 85m },
+                new[] { "Online payment" },
+                new[] { 85m }));
+        }
+
+        [Fact]
         public void SameDayCashBill_OnlineRefund_CashStaysInDrawer()
         {
             decimal onlineRefund = ClosingCashCalculations.SettlementEffectOnDrawer(

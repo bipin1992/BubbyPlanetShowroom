@@ -789,18 +789,18 @@ namespace BubbyPlanetShowroom
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
         {
             mediaPage?.Shutdown();
-            //try
-            //{
-            //    BackupProgressForm.RunBackupWithUi(this);
-            //}
-            //catch (Exception ex)
-            //{
-            //    MessageBox.Show(
-            //        "Database backup failed.\n\n" + ex.Message,
-            //        "Backup Error",
-            //        MessageBoxButtons.OK,
-            //        MessageBoxIcon.Error);
-            //}
+            try
+            {
+                BackupProgressForm.RunBackupWithUi(this);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    "Database backup failed.\n\n" + ex.Message,
+                    "Backup Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
         }
     }
 }

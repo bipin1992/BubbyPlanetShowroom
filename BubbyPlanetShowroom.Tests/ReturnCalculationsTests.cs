@@ -461,6 +461,20 @@ namespace BubbyPlanetShowroom.Tests
         }
 
         [Fact]
+        public void Order1211_Shoes199ToCrocs299_15Percent_ExtraIs85()
+        {
+            ReturnCalculations.CalculateLineAmounts(199m, 0m, 15m, 1, out _, out _, out _, out decimal shoesNet);
+            ReturnCalculations.CalculateLineAmounts(299m, 0m, 15m, 1, out _, out _, out _, out decimal crocsNet);
+
+            Assert.Equal(169.15m, shoesNet);
+            Assert.Equal(254.15m, crocsNet);
+
+            var exchange = ReturnCalculations.CalculateExchange(shoesNet, crocsNet);
+            Assert.Equal(85.00m, exchange.BalanceDue);
+            Assert.True(exchange.MeetsEqualOrMoreRule);
+        }
+
+        [Fact]
         public void ExchangeThenReturnExchangeLine_PreservesValues()
         {
             // Original line partially returned

@@ -1273,10 +1273,10 @@ namespace BubbyPlanetShowroom
                     Convert.ToDecimal(reader["discount_percent"]);
                 minPurchase =
                     Convert.ToDecimal(reader["min_purchase"]);
-                string dbName = reader["membership_name"]?.ToString()?.Trim() ?? "";
-                membershipName = dbName.Length > 0
-                    ? $"{dbName} (₹{minPurchase:N0}+, {discountPercent:0.##}% off)"
-                    : $"₹{minPurchase:N0}+ ({discountPercent:0.##}% off)";
+                membershipName = ReceiptCalculations.FormatMembershipLabel(
+                    reader["membership_name"]?.ToString(),
+                    minPurchase,
+                    discountPercent);
 
                 return discountPercent > 0;
             }
