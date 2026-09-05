@@ -1,4 +1,4 @@
-﻿
+
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -21,6 +21,8 @@ namespace BubbyPlanetShowroom
         Panel header = new Panel();
         Panel leftMenu = new Panel();
         Panel content = new Panel();
+        Panel tabHost = new Panel();
+        Panel mediaHost = new Panel();
         Panel userChip = new Panel();
 
         Label lblUser = new Label();
@@ -33,6 +35,7 @@ namespace BubbyPlanetShowroom
         private Receipt? receiptPage;
         private Return? returnPage;
         private SellingPrice? sellingPricePage;
+        private Media? mediaPage;
         private InternetConnectivityMonitor? internetMonitor;
 
         public MainForm()
@@ -127,6 +130,15 @@ namespace BubbyPlanetShowroom
             // ===== CONTENT =====
             content.Dock = DockStyle.Fill;
             content.BackColor = Color.FromArgb(248, 250, 252);
+
+            // Media stays in mediaHost when other tabs are shown, so playback
+            // is not unloaded (content.Clear used to destroy the player HWND).
+            tabHost.Dock = DockStyle.Fill;
+            tabHost.BackColor = content.BackColor;
+            mediaHost.Dock = DockStyle.Fill;
+            mediaHost.BackColor = content.BackColor;
+            content.Controls.Add(mediaHost);
+            content.Controls.Add(tabHost);
 
             this.Controls.Add(content);
             this.Controls.Add(leftMenu);
@@ -292,6 +304,7 @@ namespace BubbyPlanetShowroom
             AddMenuButton("Selling Price");
             AddMenuButton("Selling");
             AddMenuButton("Closing Balance");
+            AddMenuButton("Media");
         }
 
         private static readonly Color MenuIdle = Color.FromArgb(30, 41, 59);
@@ -334,9 +347,13 @@ namespace BubbyPlanetShowroom
                 activeButton = (Button)s;
                 SetMenuButtonActive(activeButton, true);
 
-                content.Controls.Clear();
-
                 string key = activeButton.Tag?.ToString() ?? text;
+                if (key == "Media")
+                {
+                    ShowMediaTab();
+                    return;
+                }
+
                 UserControl? uc = null;
                 try
                 {
@@ -372,7 +389,9 @@ namespace BubbyPlanetShowroom
                 if (uc != null)
                 {
                     uc.Dock = DockStyle.Fill;
-                    content.Controls.Add(uc);
+                    tabHost.Controls.Clear();
+                    tabHost.Controls.Add(uc);
+                    tabHost.BringToFront();
                 }
             };
 
@@ -481,6 +500,7 @@ namespace BubbyPlanetShowroom
             "Selling Price" => Color.FromArgb(253, 224, 71),
             "Selling" => Color.FromArgb(147, 197, 253),
             "Closing Balance" => Color.FromArgb(251, 113, 133),
+            "Media" => Color.FromArgb(192, 132, 252),
             _ => Color.FromArgb(148, 163, 184)
         };
 
@@ -617,6 +637,16 @@ namespace BubbyPlanetShowroom
                         TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
                     break;
 
+                case "Media": // play triangle
+                    Point[] play =
+                    {
+                        new Point(cx - 5, cy - s),
+                        new Point(cx - 5, cy + s),
+                        new Point(cx + s, cy)
+                    };
+                    g.FillPolygon(brush, play);
+                    break;
+
                 default:
                     g.DrawEllipse(pen, cx - 4, cy - 4, 8, 8);
                     break;
@@ -702,11 +732,25 @@ namespace BubbyPlanetShowroom
                 btn.PerformClick();
         }
 
+        private void ShowMediaTab()
+        {
+            mediaPage ??= new Media();
+            if (mediaPage.Parent != mediaHost)
+            {
+                mediaPage.Dock = DockStyle.Fill;
+                mediaHost.Controls.Add(mediaPage);
+            }
+
+            mediaHost.BringToFront();
+        }
+
         private void BtnLogout_Click(object sender, EventArgs e)
         {
             HideAllMenus();
-            content.Controls.Clear();
+            tabHost.Controls.Clear();
             sellingPricePage = null;
+            // Keep Media playing in the background. Settings stay shared for every login.
+            tabHost.BringToFront();
 
             lblUser.Text = "";
             CurrentRole = "";
@@ -727,7 +771,7 @@ namespace BubbyPlanetShowroom
 
                 if (key == "Selling Price")
                     show = role is "Master Admin" or "Admin";
-                else if (key == "Profile")
+                else if (key is "Profile" or "Media")
                     show = true;
                 else if (role == "Master Admin")
                     show = true;
@@ -744,18 +788,19 @@ namespace BubbyPlanetShowroom
 
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
         {
-            try
-            {
-                BackupProgressForm.RunBackupWithUi(this);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    "Database backup failed.\n\n" + ex.Message,
-                    "Backup Error",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
-            }
+            mediaPage?.Shutdown();
+            //try
+            //{
+            //    BackupProgressForm.RunBackupWithUi(this);
+            //}
+            //catch (Exception ex)
+            //{
+            //    MessageBox.Show(
+            //        "Database backup failed.\n\n" + ex.Message,
+            //        "Backup Error",
+            //        MessageBoxButtons.OK,
+            //        MessageBoxIcon.Error);
+            //}
         }
     }
 }
