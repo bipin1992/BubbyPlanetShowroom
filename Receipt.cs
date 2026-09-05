@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Data;
 using System.Drawing;
@@ -1254,7 +1254,8 @@ namespace BubbyPlanetShowroom
             MySqlCommand cmd =
                 new MySqlCommand(@"
                     SELECT discount_percent,
-                           min_purchase
+                           min_purchase,
+                           membership_name
                     FROM inv_reward_discount_rules
                     WHERE min_purchase <= @amt
                     AND is_active = 1
@@ -1272,8 +1273,10 @@ namespace BubbyPlanetShowroom
                     Convert.ToDecimal(reader["discount_percent"]);
                 minPurchase =
                     Convert.ToDecimal(reader["min_purchase"]);
-                membershipName =
-                    $"₹{minPurchase:N0}+ ({discountPercent:0.##}% off)";
+                string dbName = reader["membership_name"]?.ToString()?.Trim() ?? "";
+                membershipName = dbName.Length > 0
+                    ? $"{dbName} (₹{minPurchase:N0}+, {discountPercent:0.##}% off)"
+                    : $"₹{minPurchase:N0}+ ({discountPercent:0.##}% off)";
 
                 return discountPercent > 0;
             }
