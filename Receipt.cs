@@ -2461,7 +2461,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             int itemCount = GetPrintableItemCount();
             // Base includes header/footer + return policy block.
             // Keep some extra room for customer details + discount breakdown per item.
-            int baseHeight = 490;
+            int baseHeight = 515;
             int perItemHeight = 95;
             int dynamicHeight = baseHeight + (itemCount * perItemHeight);
 
@@ -2661,6 +2661,10 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             g.DrawString("8. No cash refund. Exchange only for same or higher value item.", policyFont, Brushes.Black, 5, y);
             y += 11;
             g.DrawString("9. Counter checks: barcode match, tag match, invoice match.", policyFont, Brushes.Black, 5, y);
+            y += 11;
+            g.DrawString("10. A sale item can be returned only against", policyFont, Brushes.Black, 5, y);
+            y += 10;
+            g.DrawString("    items from that same sale.", policyFont, Brushes.Black, 5, y);
             y += 16;
 
             // ===== BARCODE =====
