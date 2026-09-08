@@ -99,6 +99,8 @@ namespace BubbyPlanetShowroom.Tests
         [InlineData(@"C:\Media\bubby-15-percent-hindi.mp3", true)]
         [InlineData(@"C:\Media\bubby-15-percent-kid.mp3", true)]
         [InlineData(@"C:\Media\bubby-sale-40-percent.mp3", true)]
+        [InlineData(@"C:\Media\bubby-10-percent.mp3", true)]
+        [InlineData(@"C:\Media\bubby-instagram.mp3", true)]
         [InlineData(@"C:\Media\shape-of-you.mp3", false)]
         [InlineData(@"C:\Media\kids-party-song.mp4", false)]
         public void IsAnnouncement_DetectsPromoFiles(string path, bool expected)

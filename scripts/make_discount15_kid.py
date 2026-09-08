@@ -3,7 +3,7 @@ from pathlib import Path
 
 import edge_tts
 
-OUT = Path(r"C:\Users\atbip\OneDrive\Documents\MediaBubbyplanet")
+OUT = Path.home() / "Documents" / "MediaBubbyplanet"
 OUT.mkdir(parents=True, exist_ok=True)
 
 # Same voice as bubby-reward-system-girl10.mp3

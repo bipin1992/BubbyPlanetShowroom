@@ -20,8 +20,14 @@ namespace BubbyPlanetShowroom
             WriteIndented = true
         };
 
-        public const string ShowroomMediaFolder =
-            @"C:\Users\atbip\OneDrive\Documents\MediaBubbyplanet";
+        /// <summary>
+        /// C:\Users\{this PC user}\Documents\MediaBubbyplanet
+        /// </summary>
+        public static string ShowroomMediaFolder =>
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "Documents",
+                "MediaBubbyplanet");
 
         public static string DefaultFolderPath
         {
@@ -33,7 +39,7 @@ namespace BubbyPlanetShowroom
                 }
                 catch
                 {
-                    // Folder may already exist or OneDrive may create it later.
+                    // Folder may already exist or will be created later.
                 }
 
                 return ShowroomMediaFolder;

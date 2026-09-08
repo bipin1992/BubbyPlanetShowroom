@@ -42,7 +42,9 @@ namespace BubbyPlanetShowroom
             return name.Contains("bubby-reward")
                 || name.Contains("reward-system")
                 || name.Contains("bubby-15")
+                || name.Contains("bubby-10")
                 || name.Contains("bubby-sale")
+                || name.Contains("10-percent")
                 || name.Contains("15-percent")
                 || name.Contains("40-percent")
                 || name.Contains("percent-discount")
@@ -52,7 +54,8 @@ namespace BubbyPlanetShowroom
                 || name.Contains("percent-child")
                 || name.Contains("percent-clear")
                 || name.Contains("ek-free")
-                || name.Contains("one-free");
+                || name.Contains("one-free")
+                || name.Contains("instagram");
         }
 
         public static List<string> Announcements(IEnumerable<string> paths) =>
