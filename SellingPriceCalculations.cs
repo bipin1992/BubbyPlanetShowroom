@@ -23,7 +23,12 @@ namespace BubbyPlanetShowroom
         {
             return new List<ProfitMarginSlab>
             {
-                new ProfitMarginSlab { MinPurchaseCost = 0m, MaxPurchaseCost = 500m, MarginPercent = 45m },
+                new ProfitMarginSlab { MinPurchaseCost = 0m, MaxPurchaseCost = 50m, MarginPercent = 45m },
+                new ProfitMarginSlab { MinPurchaseCost = 50m, MaxPurchaseCost = 100m, MarginPercent = 45m },
+                new ProfitMarginSlab { MinPurchaseCost = 100m, MaxPurchaseCost = 200m, MarginPercent = 45m },
+                new ProfitMarginSlab { MinPurchaseCost = 200m, MaxPurchaseCost = 300m, MarginPercent = 45m },
+                new ProfitMarginSlab { MinPurchaseCost = 300m, MaxPurchaseCost = 400m, MarginPercent = 45m },
+                new ProfitMarginSlab { MinPurchaseCost = 400m, MaxPurchaseCost = 500m, MarginPercent = 45m },
                 new ProfitMarginSlab { MinPurchaseCost = 500m, MaxPurchaseCost = 1000m, MarginPercent = 40m },
                 new ProfitMarginSlab { MinPurchaseCost = 1000m, MaxPurchaseCost = 1500m, MarginPercent = 35m },
                 new ProfitMarginSlab { MinPurchaseCost = 1500m, MaxPurchaseCost = 2000m, MarginPercent = 30m },
@@ -130,7 +135,8 @@ namespace BubbyPlanetShowroom
             decimal perPieceRate,
             int quantity,
             PricingSettings settings,
-            decimal itemTransportCost = 0m)
+            decimal itemTransportCost = 0m,
+            decimal discountPercent = 0m)
         {
             if (settings == null)
                 throw new ArgumentNullException(nameof(settings));
@@ -140,6 +146,8 @@ namespace BubbyPlanetShowroom
                 throw new ArgumentOutOfRangeException(nameof(quantity), "Quantity must be at least 1.");
             if (itemTransportCost < 0m)
                 throw new ArgumentOutOfRangeException(nameof(itemTransportCost), "Transport cost cannot be negative.");
+            if (discountPercent < 0m || discountPercent > 100m)
+                throw new ArgumentOutOfRangeException(nameof(discountPercent), "Discount must be 0–100%.");
             if (settings.ExpectedMonthlySales <= 0m)
                 throw new InvalidOperationException("Expected monthly sales must be greater than 0.");
             if (settings.MonthlyRent < 0m || settings.MonthlySalary < 0m)
@@ -162,8 +170,10 @@ namespace BubbyPlanetShowroom
 
             decimal priceBeforeRounding = requiredNet;
             decimal finalPrice = RoundUpToEndingDigit(priceBeforeRounding, settings.PriceEndingDigit);
+            decimal discountAmount = Round2(finalPrice * (discountPercent / 100m));
+            decimal customerPayable = Round2(finalPrice - discountAmount);
             decimal actualTotalCost = purchasePerPiece + transportPerPiece + rentPerPiece + salaryPerPiece;
-            decimal actualProfit = finalPrice - actualTotalCost;
+            decimal actualProfit = customerPayable - actualTotalCost;
 
             return new SellingPriceResult
             {
@@ -174,7 +184,7 @@ namespace BubbyPlanetShowroom
                 MonthlyRent = Round2(settings.MonthlyRent),
                 MonthlySalary = Round2(settings.MonthlySalary),
                 ExpectedMonthlySales = settings.ExpectedMonthlySales,
-                DiscountPercent = 0m,
+                DiscountPercent = discountPercent,
                 PriceEndingDigit = settings.PriceEndingDigit,
                 PurchaseCostPerPiece = Round2(purchasePerPiece),
                 TransportPerPiece = Round2(transportPerPiece),
@@ -183,11 +193,11 @@ namespace BubbyPlanetShowroom
                 ProfitMarginPercent = marginPercent,
                 ProfitPerPiece = Round2(profitPerPiece),
                 RequiredNetPrice = Round2(requiredNet),
-                DiscountKeepRatio = 1m,
+                DiscountKeepRatio = 1m - (discountPercent / 100m),
                 PriceBeforeRounding = Round2(priceBeforeRounding),
                 FinalSellingPrice = finalPrice,
-                DiscountAmount = 0m,
-                CustomerPayable = finalPrice,
+                DiscountAmount = discountAmount,
+                CustomerPayable = customerPayable,
                 ActualTotalCost = Round2(actualTotalCost),
                 ActualProfit = Round2(actualProfit)
             };
