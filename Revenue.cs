@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -10,9 +11,13 @@ namespace BubbyPlanetShowroom
 {
     public class Revenue : UserControl
     {
+        private readonly Panel pageScroll = new Panel();
+        private readonly Panel pageInner = new Panel();
         private readonly Panel topPanel = new Panel();
         private readonly FlowLayoutPanel summaryPanel = new FlowLayoutPanel();
         private readonly Panel chartPanel = new Panel();
+        private readonly Panel mixChartPanel = new Panel();
+        private readonly Panel categoryChartPanel = new Panel();
         private readonly DataGridView grid = new DataGridView();
         private readonly ComboBox cmbType = new ComboBox();
         private readonly DateTimePicker dtpDate = new DateTimePicker();
@@ -20,9 +25,23 @@ namespace BubbyPlanetShowroom
         private readonly DateTimePicker dtpTo = new DateTimePicker();
         private readonly Label statusLabel = new Label();
         private readonly Label graphTitle = new Label();
+        private readonly Label mixTitle = new Label();
+        private readonly Label categoryTitle = new Label();
         private readonly Label tableTitle = new Label();
 
         private DataTable graphData = new DataTable();
+        private DataTable categoryData = new DataTable();
+        private readonly Color[] sliceColors =
+        {
+            Color.FromArgb(37, 99, 235),
+            Color.FromArgb(16, 185, 129),
+            Color.FromArgb(245, 158, 11),
+            Color.FromArgb(139, 92, 246),
+            Color.FromArgb(236, 72, 153),
+            Color.FromArgb(6, 182, 212),
+            Color.FromArgb(249, 115, 22),
+            Color.FromArgb(100, 116, 139)
+        };
 
         private readonly Color pageBack = Color.FromArgb(245, 247, 251);
         private readonly Color navy = Color.FromArgb(21, 32, 55);
@@ -35,7 +54,7 @@ namespace BubbyPlanetShowroom
         public Revenue()
         {
             InitUI();
-            cmbType.SelectedIndex = 3;
+            cmbType.SelectedIndex = cmbType.Items.IndexOf("This Month");
             LoadData();
         }
 
@@ -43,12 +62,29 @@ namespace BubbyPlanetShowroom
         {
             Dock = DockStyle.Fill;
             BackColor = pageBack;
-            Padding = new Padding(18);
+            Padding = new Padding(0);
+
+            pageScroll.Dock = DockStyle.Fill;
+            pageScroll.BackColor = pageBack;
+            pageScroll.AutoScroll = true;
+            pageScroll.AutoScrollMargin = new Size(8, 8);
+            pageScroll.Resize += (s, e) => FitScrollContent();
+
+            pageInner.BackColor = pageBack;
+            pageInner.Location = Point.Empty;
+            pageInner.Padding = new Padding(18);
 
             topPanel.Dock = DockStyle.Top;
-            topPanel.Height = 78;
+            topPanel.Height = 86;
             topPanel.BackColor = pageBack;
-            topPanel.Padding = new Padding(0, 0, 0, 14);
+            topPanel.Padding = new Padding(0, 0, 0, 12);
+
+            Panel titleBar = new Panel
+            {
+                Dock = DockStyle.Left,
+                Width = 420,
+                BackColor = pageBack
+            };
 
             Label title = new Label
             {
@@ -56,23 +92,26 @@ namespace BubbyPlanetShowroom
                 AutoSize = true,
                 Font = new Font("Segoe UI Semibold", 20, FontStyle.Bold),
                 ForeColor = textMain,
-                Location = new Point(0, 4)
+                Location = new Point(0, 2)
             };
 
             Label subtitle = new Label
             {
-                Text = "Sales, cost price and profit view",
+                Text = "Sales · cost · profit  ·  pie charts follow the selected filter",
                 AutoSize = true,
                 Font = new Font("Segoe UI", 9),
                 ForeColor = textMuted,
-                Location = new Point(3, 44)
+                Location = new Point(2, 42)
             };
 
-            cmbType.Items.AddRange(new string[] { "Date Wise", "Date Range", "Today", "This Month", "This Year", "Till Date", "Category Wise" });
+            titleBar.Controls.Add(title);
+            titleBar.Controls.Add(subtitle);
+
+            cmbType.Items.AddRange(new string[] { "Date Wise", "Date Range", "Today", "Last 7 Days", "This Month", "This Year", "Till Date", "Category Wise" });
             cmbType.DropDownStyle = ComboBoxStyle.DropDownList;
             cmbType.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            cmbType.Location = new Point(Math.Max(0, Width - 190), 16);
-            cmbType.Width = 168;
+            cmbType.Location = new Point(Math.Max(0, Width - 190), 18);
+            cmbType.Width = 176;
             cmbType.Font = new Font("Segoe UI", 10);
             cmbType.SelectedIndexChanged += (s, e) =>
             {
@@ -125,8 +164,7 @@ namespace BubbyPlanetShowroom
                 PositionFilters();
             };
 
-            topPanel.Controls.Add(title);
-            topPanel.Controls.Add(subtitle);
+            topPanel.Controls.Add(titleBar);
             topPanel.Controls.Add(dtpTo);
             topPanel.Controls.Add(dtpFrom);
             topPanel.Controls.Add(dtpDate);
@@ -137,7 +175,7 @@ namespace BubbyPlanetShowroom
             summaryPanel.BackColor = pageBack;
             summaryPanel.WrapContents = false;
             summaryPanel.AutoScroll = true;
-            summaryPanel.Padding = new Padding(0, 2, 0, 14);
+            summaryPanel.Padding = new Padding(0, 2, 0, 12);
 
             Panel content = new Panel
             {
@@ -149,37 +187,77 @@ namespace BubbyPlanetShowroom
             {
                 Dock = DockStyle.Fill,
                 BackColor = Color.White,
-                Radius = 8,
-                Padding = new Padding(16)
+                Radius = 10,
+                Padding = new Padding(16),
+                ClipToRoundRegion = false
             };
 
-            RoundedPanel graphWrapper = new RoundedPanel
+            Panel chartsRow = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = 285,
-                BackColor = Color.White,
-                Radius = 8,
-                Padding = new Padding(16),
-                Margin = new Padding(0, 0, 0, 14)
+                Height = 312,
+                BackColor = pageBack,
+                Padding = new Padding(0, 12, 0, 0)
             };
 
+            TableLayoutPanel chartsLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 3,
+                RowCount = 1,
+                BackColor = pageBack
+            };
+            chartsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42f));
+            chartsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 29f));
+            chartsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 29f));
+
+            RoundedPanel barCard = CreateChartCard();
             graphTitle.Text = "Sales vs Profit";
             graphTitle.Dock = DockStyle.Top;
-            graphTitle.Height = 28;
+            graphTitle.Height = 30;
             graphTitle.Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold);
             graphTitle.ForeColor = textMain;
+            chartPanel.Dock = DockStyle.Fill;
+            chartPanel.BackColor = Color.White;
+            chartPanel.Paint += GraphPanel_Paint;
+            barCard.Controls.Add(chartPanel);
+            barCard.Controls.Add(graphTitle);
+
+            RoundedPanel mixCard = CreateChartCard();
+            mixTitle.Text = "Cost vs Profit";
+            mixTitle.Dock = DockStyle.Top;
+            mixTitle.Height = 30;
+            mixTitle.Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold);
+            mixTitle.ForeColor = textMain;
+            mixChartPanel.Dock = DockStyle.Fill;
+            mixChartPanel.BackColor = Color.White;
+            mixChartPanel.Paint += MixChart_Paint;
+            mixCard.Controls.Add(mixChartPanel);
+            mixCard.Controls.Add(mixTitle);
+
+            RoundedPanel categoryCard = CreateChartCard();
+            categoryTitle.Text = "Category share";
+            categoryTitle.Dock = DockStyle.Top;
+            categoryTitle.Height = 30;
+            categoryTitle.Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold);
+            categoryTitle.ForeColor = textMain;
+            categoryChartPanel.Dock = DockStyle.Fill;
+            categoryChartPanel.BackColor = Color.White;
+            categoryChartPanel.Paint += CategoryChart_Paint;
+            categoryCard.Controls.Add(categoryChartPanel);
+            categoryCard.Controls.Add(categoryTitle);
+            categoryCard.Margin = new Padding(0);
+
+            chartsLayout.Controls.Add(barCard, 0, 0);
+            chartsLayout.Controls.Add(mixCard, 1, 0);
+            chartsLayout.Controls.Add(categoryCard, 2, 0);
+            chartsRow.Controls.Add(chartsLayout);
 
             tableTitle.Text = "Period Breakdown";
             tableTitle.Dock = DockStyle.Top;
             tableTitle.Height = 32;
             tableTitle.Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold);
             tableTitle.ForeColor = textMain;
-
-            chartPanel.Dock = DockStyle.Fill;
-            chartPanel.BackColor = Color.White;
-            chartPanel.Paint += GraphPanel_Paint;
-            graphWrapper.Controls.Add(chartPanel);
-            graphWrapper.Controls.Add(graphTitle);
 
             statusLabel.Dock = DockStyle.Bottom;
             statusLabel.Height = 24;
@@ -193,11 +271,36 @@ namespace BubbyPlanetShowroom
             tablePanel.Controls.Add(tableTitle);
 
             content.Controls.Add(tablePanel);
-            content.Controls.Add(graphWrapper);
+            content.Controls.Add(chartsRow);
 
-            Controls.Add(content);
-            Controls.Add(summaryPanel);
-            Controls.Add(topPanel);
+            pageInner.Controls.Add(content);
+            pageInner.Controls.Add(summaryPanel);
+            pageInner.Controls.Add(topPanel);
+            pageScroll.Controls.Add(pageInner);
+            Controls.Add(pageScroll);
+            FitScrollContent();
+        }
+
+        private void FitScrollContent()
+        {
+            int viewW = pageScroll.ClientSize.Width;
+            int viewH = pageScroll.ClientSize.Height;
+            int width = Math.Max(viewW, 1040);
+            int height = Math.Max(viewH, 920);
+            if (pageInner.Width != width || pageInner.Height != height)
+                pageInner.Size = new Size(width, height);
+        }
+
+        private RoundedPanel CreateChartCard()
+        {
+            return new RoundedPanel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.White,
+                Radius = 10,
+                Padding = new Padding(12, 10, 12, 10),
+                Margin = new Padding(0, 0, 10, 0)
+            };
         }
 
         private void PositionFilters()
@@ -237,6 +340,7 @@ namespace BubbyPlanetShowroom
             grid.ReadOnly = true;
             grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
             grid.MultiSelect = false;
+            grid.ScrollBars = ScrollBars.Both;
             grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             grid.EnableHeadersVisualStyles = false;
             grid.ColumnHeadersHeight = 38;
@@ -263,6 +367,7 @@ namespace BubbyPlanetShowroom
                 {
                     con.Open();
                     LoadSummary(con);
+                    LoadCategoryShare(con);
                     LoadGraphGrid(con);
                 }
             }
@@ -270,9 +375,12 @@ namespace BubbyPlanetShowroom
             {
                 summaryPanel.Controls.Clear();
                 graphData = new DataTable();
+                categoryData = new DataTable();
                 grid.DataSource = null;
                 statusLabel.Text = "Unable to load revenue data: " + ex.Message;
                 chartPanel.Invalidate();
+                mixChartPanel.Invalidate();
+                categoryChartPanel.Invalidate();
             }
         }
 
@@ -295,7 +403,9 @@ namespace BubbyPlanetShowroom
         private void LoadGraphGrid(MySqlConnection con)
         {
             tableTitle.Text = cmbType.Text == "Category Wise" ? "Category Breakdown" : "Period Breakdown";
-            graphTitle.Text = cmbType.Text == "Category Wise" ? "Category Sales vs Profit" : "Sales vs Profit";
+            graphTitle.Text = cmbType.Text == "Category Wise" ? "Category sales vs profit" : "Sales vs Profit";
+            mixTitle.Text = "Cost vs Profit";
+            categoryTitle.Text = cmbType.Text == "Category Wise" ? "Payment share" : "Category share";
 
             string query = BuildPeriodQuery();
             using (MySqlDataAdapter da = new MySqlDataAdapter(query, con))
@@ -314,6 +424,75 @@ namespace BubbyPlanetShowroom
 
             statusLabel.Text = $"Selected view: {GetSelectedViewText()}   |   Sales: Rs. {sales:N2}   Cost: Rs. {cost:N2}   Profit: Rs. {profit:N2}   Profit %: {profitPercent:N1}%";
             chartPanel.Refresh();
+            mixChartPanel.Refresh();
+            categoryChartPanel.Refresh();
+            FitScrollContent();
+        }
+
+        private void LoadCategoryShare(MySqlConnection con)
+        {
+            string condition = GetViewCondition();
+            bool paymentInstead = cmbType.Text == "Category Wise";
+            string nameExpr = paymentInstead
+                ? "IFNULL(NULLIF(TRIM(o.payment_method), ''), 'Cash')"
+                : "IFNULL(NULLIF(TRIM(i.main_category), ''), 'Other')";
+
+            string query = $@"
+SELECT
+    {nameExpr} AS Period,
+    ROUND(IFNULL(SUM(IFNULL(d.net_amount,0)),0), 2) AS Sales
+FROM inv_orders o
+INNER JOIN inv_order_details d ON d.order_id = o.id
+LEFT JOIN inv_items_master i ON i.id = d.item_id
+WHERE {condition}
+GROUP BY {nameExpr}
+HAVING Sales > 0
+ORDER BY Sales DESC;";
+
+            using (MySqlDataAdapter da = new MySqlDataAdapter(query, con))
+            {
+                categoryData = new DataTable();
+                da.Fill(categoryData);
+            }
+        }
+
+        private string GetViewCondition()
+        {
+            if (cmbType.Text == "Category Wise" || cmbType.Text == "Till Date")
+                return "1=1";
+
+            if (cmbType.Text == "Date Wise")
+            {
+                string selectedDate = dtpDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                return $"DATE(o.date_added) = '{selectedDate}'";
+            }
+
+            if (cmbType.Text == "Date Range")
+            {
+                DateTime from = dtpFrom.Value.Date;
+                DateTime to = dtpTo.Value.Date;
+                if (from > to)
+                {
+                    DateTime temp = from;
+                    from = to;
+                    to = temp;
+                }
+
+                string fromSql = from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                string toSql = to.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                return $"DATE(o.date_added) BETWEEN '{fromSql}' AND '{toSql}'";
+            }
+
+            if (cmbType.Text == "Today")
+                return "DATE(o.date_added) = CURDATE()";
+
+            if (cmbType.Text == "Last 7 Days")
+                return "DATE(o.date_added) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)";
+
+            if (cmbType.Text == "This Year")
+                return "YEAR(o.date_added)=YEAR(CURDATE())";
+
+            return "YEAR(o.date_added)=YEAR(CURDATE()) AND MONTH(o.date_added)=MONTH(CURDATE())";
         }
 
         private string BuildPeriodQuery()
@@ -368,6 +547,14 @@ namespace BubbyPlanetShowroom
                 condition = "DATE(o.date_added) = CURDATE()";
                 groupSql = "HOUR(o.date_added), DATE_FORMAT(o.date_added, '%h %p')";
                 orderSql = "sort_key ASC";
+            }
+            else if (cmbType.Text == "Last 7 Days")
+            {
+                periodSql = "DATE_FORMAT(o.date_added, '%d %b')";
+                sortSql = "DATE(o.date_added)";
+                condition = "DATE(o.date_added) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)";
+                groupSql = "DATE(o.date_added), DATE_FORMAT(o.date_added, '%d %b')";
+                orderSql = "sort_key DESC";
             }
             else if (cmbType.Text == "This Year")
             {
@@ -428,6 +615,10 @@ HAVING Sales > 0 OR Cost > 0
 ORDER BY {orderSql};";
         }
 
+        /// <summary>
+        /// Billed sales from order lines. Live DB keeps SUM(net_amount)
+        /// equal to inv_orders.grand_total, so this matches Selling Total Sale.
+        /// </summary>
         private MetricSnapshot GetMetrics(MySqlConnection con, string condition)
         {
             string query = $@"
@@ -502,6 +693,7 @@ WHERE {condition};";
             {
                 if (col.Name != "Period")
                     col.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+                col.MinimumWidth = col.Name == "Period" ? 100 : 88;
             }
         }
 
@@ -578,7 +770,8 @@ WHERE {condition};";
 
             Label profitLabel = new Label
             {
-                Text = "Profit: Rs. " + FormatAmount(metric.Profit),
+                Text = "Profit: Rs. " + FormatAmount(metric.Profit) +
+                    (metric.Sales == 0 ? "" : "  (" + ((metric.Profit / metric.Sales) * 100m).ToString("0.0") + "%)"),
                 AutoSize = false,
                 Width = 188,
                 Height = 18,
@@ -647,6 +840,145 @@ WHERE {condition};";
             }
 
             return cmbType.Text;
+        }
+
+        private void MixChart_Paint(object sender, PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.Clear(Color.White);
+
+            decimal cost = SumColumn("Cost");
+            decimal profit = SumColumn("Profit");
+            var slices = new List<PieSlice>();
+            if (cost > 0)
+                slices.Add(new PieSlice("Cost", cost, costAmber));
+            if (profit > 0)
+                slices.Add(new PieSlice("Profit", profit, profitGreen));
+            else if (profit < 0)
+                slices.Add(new PieSlice("Loss", Math.Abs(profit), Color.FromArgb(220, 38, 38)));
+
+            DrawDonut(g, mixChartPanel.ClientRectangle, slices, "Mix");
+        }
+
+        private void CategoryChart_Paint(object sender, PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.Clear(Color.White);
+            DrawDonut(g, categoryChartPanel.ClientRectangle, BuildNamedSlices(categoryData), "Share");
+        }
+
+        private List<PieSlice> BuildNamedSlices(DataTable table)
+        {
+            var slices = new List<PieSlice>();
+            if (table == null || table.Rows.Count == 0)
+                return slices;
+
+            decimal other = 0;
+            int index = 0;
+            foreach (DataRow row in table.Rows)
+            {
+                decimal sales = 0;
+                if (table.Columns.Contains("Sales") && row["Sales"] != DBNull.Value)
+                    sales = Convert.ToDecimal(row["Sales"]);
+                if (sales <= 0)
+                    continue;
+
+                if (index < sliceColors.Length - 1)
+                {
+                    string name = row["Period"]?.ToString() ?? "Other";
+                    if (name.Length > 14)
+                        name = name.Substring(0, 14);
+                    slices.Add(new PieSlice(name, sales, sliceColors[index]));
+                    index++;
+                }
+                else
+                {
+                    other += sales;
+                }
+            }
+
+            if (other > 0)
+                slices.Add(new PieSlice("Other", other, sliceColors[sliceColors.Length - 1]));
+
+            return slices;
+        }
+
+        private void DrawDonut(Graphics g, Rectangle area, List<PieSlice> slices, string emptyTitle)
+        {
+            if (area.Width < 80 || area.Height < 80)
+                return;
+
+            decimal total = 0;
+            foreach (PieSlice slice in slices)
+                total += slice.Value;
+
+            if (slices.Count == 0 || total <= 0)
+            {
+                DrawCenteredText(g, "No " + emptyTitle.ToLower() + " data", area, textMuted);
+                return;
+            }
+
+            int legendWidth = 118;
+            int pieBox = Math.Min(area.Width - legendWidth - 8, area.Height - 8);
+            pieBox = Math.Max(90, pieBox);
+            int pieX = 8;
+            int pieY = Math.Max(4, (area.Height - pieBox) / 2);
+            Rectangle pie = new Rectangle(pieX, pieY, pieBox, pieBox);
+
+            float start = -90f;
+            foreach (PieSlice slice in slices)
+            {
+                float sweep = (float)((double)(slice.Value / total) * 360d);
+                if (sweep <= 0)
+                    continue;
+                using (SolidBrush brush = new SolidBrush(slice.Color))
+                {
+                    g.FillPie(brush, pie, start, Math.Max(0.5f, sweep));
+                }
+                start += sweep;
+            }
+
+            int hole = (int)(pieBox * 0.52);
+            Rectangle holeRect = new Rectangle(
+                pie.X + (pieBox - hole) / 2,
+                pie.Y + (pieBox - hole) / 2,
+                hole,
+                hole);
+            using (SolidBrush holeBrush = new SolidBrush(Color.White))
+            {
+                g.FillEllipse(holeBrush, holeRect);
+            }
+
+            using (Font centerFont = new Font("Segoe UI Semibold", 8.5f, FontStyle.Bold))
+            using (SolidBrush centerBrush = new SolidBrush(textMain))
+            using (StringFormat format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+            {
+                g.DrawString(FormatAmount(total), centerFont, centerBrush, holeRect, format);
+            }
+
+            int legendX = pie.Right + 10;
+            int legendY = Math.Max(8, pie.Y + 4);
+            using (Font legendFont = new Font("Segoe UI", 8f))
+            using (SolidBrush textBrush = new SolidBrush(textMuted))
+            using (SolidBrush valueBrush = new SolidBrush(textMain))
+            {
+                foreach (PieSlice slice in slices)
+                {
+                    using (SolidBrush swatch = new SolidBrush(slice.Color))
+                    {
+                        g.FillEllipse(swatch, legendX, legendY + 3, 9, 9);
+                    }
+
+                    decimal pct = total == 0 ? 0 : (slice.Value / total) * 100m;
+                    g.DrawString(slice.Label, legendFont, valueBrush, legendX + 14, legendY);
+                    g.DrawString(pct.ToString("0.0") + "%  " + FormatAmount(slice.Value), legendFont, textBrush, legendX + 14, legendY + 13);
+                    legendY += 32;
+                    if (legendY > area.Bottom - 28)
+                        break;
+                }
+            }
         }
 
         private void GraphPanel_Paint(object sender, PaintEventArgs e)
@@ -765,6 +1097,20 @@ WHERE {condition};";
             }
         }
 
+        private class PieSlice
+        {
+            public PieSlice(string label, decimal value, Color color)
+            {
+                Label = label;
+                Value = value;
+                Color = color;
+            }
+
+            public string Label { get; }
+            public decimal Value { get; }
+            public Color Color { get; }
+        }
+
         private class MetricSnapshot
         {
             public decimal Sales { get; set; }
@@ -777,6 +1123,7 @@ WHERE {condition};";
         private class RoundedPanel : Panel
         {
             public int Radius { get; set; } = 8;
+            public bool ClipToRoundRegion { get; set; } = true;
 
             protected override void OnPaint(PaintEventArgs e)
             {
@@ -789,7 +1136,8 @@ WHERE {condition};";
                 using (GraphicsPath path = CreatePath(ClientRectangle, Radius))
                 using (Pen pen = new Pen(Color.FromArgb(226, 232, 240)))
                 {
-                    Region = new Region(path);
+                    if (ClipToRoundRegion)
+                        Region = new Region(path);
                     Rectangle borderRect = ClientRectangle;
                     borderRect.Width = Math.Max(1, borderRect.Width - 1);
                     borderRect.Height = Math.Max(1, borderRect.Height - 1);
