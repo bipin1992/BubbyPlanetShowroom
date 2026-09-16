@@ -2654,6 +2654,10 @@ namespace BubbyPlanetShowroom
             g.DrawString("8. No cash refund. Exchange only for same or higher value item.", policyFont, Brushes.Black, 5, y);
             y += 11;
             g.DrawString("9. Counter checks: barcode match, tag match, invoice match.", policyFont, Brushes.Black, 5, y);
+            y += 11;
+            g.DrawString("10. A sale item can be returned only against", policyFont, Brushes.Black, 5, y);
+            y += 10;
+            g.DrawString("    items from that same sale.", policyFont, Brushes.Black, 5, y);
             y += 16;
 
             if (int.TryParse(txtOrderId.Text.Trim(), out int orderIdForBarcode) && orderIdForBarcode > 0)
@@ -2804,7 +2808,7 @@ namespace BubbyPlanetShowroom
             // Receipt-style: ~110px per item block + header/footer/policy/barcode
             int itemCount = pendingPrintLines.Count + pendingExchangePrintLines.Count;
             if (itemCount <= 0) itemCount = 1;
-            int baseHeight = 520;
+            int baseHeight = 545;
             int perItem = 110;
             return baseHeight + (itemCount * perItem);
         }

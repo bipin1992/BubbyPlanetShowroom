@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Data;
 using System.Drawing;
@@ -1254,7 +1254,8 @@ namespace BubbyPlanetShowroom
             MySqlCommand cmd =
                 new MySqlCommand(@"
                     SELECT discount_percent,
-                           min_purchase
+                           min_purchase,
+                           membership_name
                     FROM inv_reward_discount_rules
                     WHERE min_purchase <= @amt
                     AND is_active = 1
@@ -1272,8 +1273,10 @@ namespace BubbyPlanetShowroom
                     Convert.ToDecimal(reader["discount_percent"]);
                 minPurchase =
                     Convert.ToDecimal(reader["min_purchase"]);
-                membershipName =
-                    $"₹{minPurchase:N0}+ ({discountPercent:0.##}% off)";
+                membershipName = ReceiptCalculations.FormatMembershipLabel(
+                    reader["membership_name"]?.ToString(),
+                    minPurchase,
+                    discountPercent);
 
                 return discountPercent > 0;
             }
@@ -2458,7 +2461,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             int itemCount = GetPrintableItemCount();
             // Base includes header/footer + return policy block.
             // Keep some extra room for customer details + discount breakdown per item.
-            int baseHeight = 490;
+            int baseHeight = 515;
             int perItemHeight = 95;
             int dynamicHeight = baseHeight + (itemCount * perItemHeight);
 
@@ -2658,6 +2661,10 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             g.DrawString("8. No cash refund. Exchange only for same or higher value item.", policyFont, Brushes.Black, 5, y);
             y += 11;
             g.DrawString("9. Counter checks: barcode match, tag match, invoice match.", policyFont, Brushes.Black, 5, y);
+            y += 11;
+            g.DrawString("10. A sale item can be returned only against", policyFont, Brushes.Black, 5, y);
+            y += 10;
+            g.DrawString("    items from that same sale.", policyFont, Brushes.Black, 5, y);
             y += 16;
 
             // ===== BARCODE =====

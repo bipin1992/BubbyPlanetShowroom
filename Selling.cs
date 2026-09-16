@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -28,9 +27,11 @@ namespace BubbyPlanetShowroom
         private DateTimePicker dtTo;
 
         private Button btnSearch;
+        private bool applyingFilter;
 
         private DataGridView dgvOrders;
         private DataGridView dgvDetails;
+        private Label lblOrdersHint;
 
         public Selling()
         {
@@ -38,9 +39,11 @@ namespace BubbyPlanetShowroom
 
             Load += (s, e) =>
             {
+                applyingFilter = true;
                 LoadUsers();
-                LoadSummary();
-                LoadOrders();
+                SyncDatePickersFromPeriod();
+                applyingFilter = false;
+                ApplyFilter();
             };
         }
 
@@ -60,10 +63,10 @@ namespace BubbyPlanetShowroom
                 Padding = new Padding(0)
             };
             main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            main.RowStyles.Add(new RowStyle(SizeType.Absolute, 78f));   // page header (title + subtitle)
+            main.RowStyles.Add(new RowStyle(SizeType.Absolute, 78f));   // page header
             main.RowStyles.Add(new RowStyle(SizeType.Absolute, 118f));  // summary + filters
-            main.RowStyles.Add(new RowStyle(SizeType.Percent, 45f));    // orders
-            main.RowStyles.Add(new RowStyle(SizeType.Percent, 55f));    // details
+            main.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));   // orders
+            main.RowStyles.Add(new RowStyle(SizeType.Absolute, 230f));  // details
             Controls.Add(main);
 
             // ----- Page header -----
@@ -131,21 +134,35 @@ namespace BubbyPlanetShowroom
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Location = new Point(8, 24),
-                Width = 110,
+                Width = 124,
                 Font = new Font("Segoe UI", 9.5f),
                 FlatStyle = FlatStyle.Flat
             };
-            cmbFilter.Items.AddRange(new object[] { "Today", "Weekly", "Monthly", "Yearly", "Custom" });
+            cmbFilter.Items.AddRange(new object[] { "Today", "Last 7 Days", "Weekly", "Monthly", "Yearly", "Custom" });
             cmbFilter.SelectedIndex = 0;
+            cmbFilter.SelectedIndexChanged += (s, e) =>
+            {
+                if (applyingFilter)
+                    return;
+                applyingFilter = true;
+                SyncDatePickersFromPeriod();
+                applyingFilter = false;
+                ApplyFilter();
+            };
 
-            Label lblUser = MakeTinyLabel("USER", 130, 4);
+            Label lblUser = MakeTinyLabel("USER", 140, 4);
             cmbUser = new ComboBox
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
-                Location = new Point(130, 24),
-                Width = 130,
+                Location = new Point(140, 24),
+                Width = 124,
                 Font = new Font("Segoe UI", 9.5f),
                 FlatStyle = FlatStyle.Flat
+            };
+            cmbUser.SelectedIndexChanged += (s, e) =>
+            {
+                if (!applyingFilter)
+                    ApplyFilter();
             };
 
             Label lblFrom = MakeTinyLabel("FROM", 272, 4);
@@ -156,6 +173,7 @@ namespace BubbyPlanetShowroom
                 Width = 110,
                 Font = new Font("Segoe UI", 9.5f)
             };
+            dtFrom.ValueChanged += DatePickerChanged;
 
             Label lblTo = MakeTinyLabel("TO", 394, 4);
             dtTo = new DateTimePicker
@@ -165,6 +183,7 @@ namespace BubbyPlanetShowroom
                 Width = 110,
                 Font = new Font("Segoe UI", 9.5f)
             };
+            dtTo.ValueChanged += DatePickerChanged;
 
             btnSearch = new Button
             {
@@ -179,11 +198,7 @@ namespace BubbyPlanetShowroom
                 UseVisualStyleBackColor = false
             };
             btnSearch.FlatAppearance.BorderSize = 0;
-            btnSearch.Click += (s, e) =>
-            {
-                LoadSummary();
-                LoadOrders();
-            };
+            btnSearch.Click += (s, e) => ApplyFilter();
 
             filterPanel.Controls.Add(lblPeriod);
             filterPanel.Controls.Add(cmbFilter);
@@ -203,6 +218,7 @@ namespace BubbyPlanetShowroom
             Panel ordersCard = CreateCard();
             ordersCard.Padding = new Padding(1);
             dgvOrders = CreateGrid();
+            dgvOrders.ScrollBars = ScrollBars.Both;
             dgvOrders.Columns.Add("OrderId", "Order ID");
             dgvOrders.Columns.Add("Type", "Type");
             dgvOrders.Columns.Add("Date", "Date");
@@ -214,7 +230,7 @@ namespace BubbyPlanetShowroom
             dgvOrders.Columns.Add("RowKind", "RowKind");
             dgvOrders.Columns["RowKind"].Visible = false;
             dgvOrders.SelectionChanged += DgvOrders_SelectionChanged;
-            Panel ordersHeaderBar = CreateSectionHeader("ORDERS", "Return extra ke baad T99 sale nahi — Total Sale sirf extra");
+            Panel ordersHeaderBar = CreateSectionHeader("ORDERS", "Filter ki saari bills yahan dikhengi", out lblOrdersHint);
             ordersCard.Controls.Add(dgvOrders);
             ordersCard.Controls.Add(ordersHeaderBar);
 
@@ -235,7 +251,7 @@ namespace BubbyPlanetShowroom
             dgvDetails.Columns.Add("Taxable", "Taxable");
             dgvDetails.Columns.Add("GST", "GST");
             dgvDetails.Columns.Add("Total", "Total");
-            Panel detailsHeaderBar = CreateSectionHeader("ORDER DETAILS", "Line items for the selected order");
+            Panel detailsHeaderBar = CreateSectionHeader("ORDER DETAILS", "Line items for the selected order", out _);
             dgvDetails.Dock = DockStyle.Fill;
             detailsCard.Controls.Add(dgvDetails);
             detailsCard.Controls.Add(detailsHeaderBar);
@@ -257,7 +273,7 @@ namespace BubbyPlanetShowroom
             };
         }
 
-        private static Panel CreateSectionHeader(string title, string hint)
+        private static Panel CreateSectionHeader(string title, string hint, out Label hintLabel)
         {
             Panel bar = new Panel
             {
@@ -283,6 +299,7 @@ namespace BubbyPlanetShowroom
                 ForeColor = Color.FromArgb(148, 163, 184),
                 TextAlign = ContentAlignment.MiddleRight
             };
+            hintLabel = lblHint;
             bar.Controls.Add(lblHint);
             bar.Controls.Add(lblTitle);
             return bar;
@@ -355,6 +372,7 @@ namespace BubbyPlanetShowroom
                 BorderStyle = BorderStyle.None,
                 CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
                 GridColor = Color.FromArgb(226, 232, 240),
+                ScrollBars = ScrollBars.Both,
                 RowTemplate = { Height = 32 },
                 ColumnHeadersHeight = 36,
                 ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
@@ -374,6 +392,55 @@ namespace BubbyPlanetShowroom
             return grid;
         }
 
+        private void ApplyFilter()
+        {
+            LoadSummary();
+            LoadOrders();
+        }
+
+        private void DatePickerChanged(object sender, EventArgs e)
+        {
+            if (applyingFilter)
+                return;
+
+            applyingFilter = true;
+            if (cmbFilter.Text != "Custom")
+                cmbFilter.SelectedItem = "Custom";
+            applyingFilter = false;
+            ApplyFilter();
+        }
+
+        private void SyncDatePickersFromPeriod()
+        {
+            if (cmbFilter.Text == "Custom")
+                return;
+
+            SellingCalculations.ResolveFilterRange(
+                cmbFilter.Text,
+                DateTime.Today,
+                dtFrom.Value,
+                dtTo.Value,
+                out DateTime from,
+                out DateTime to);
+
+            if (from < dtFrom.MinDate)
+                from = dtFrom.MinDate;
+            if (to > dtTo.MaxDate)
+                to = dtTo.MaxDate;
+            if (from > to)
+                from = to;
+
+            dtFrom.Value = from;
+            dtTo.Value = to;
+        }
+
+        private bool HasUserFilter()
+        {
+            return cmbUser.SelectedItem != null
+                && cmbUser.Text != "All Users"
+                && !string.IsNullOrWhiteSpace(cmbUser.Text);
+        }
+
         private void LoadSummary()
         {
             try
@@ -384,15 +451,9 @@ namespace BubbyPlanetShowroom
                     DB.EnsureReturnSettlementSchema(conn);
 
                     string orderWhere = GetDateCondition("o.date_added");
-                    string extraWhere = GetExchangeExtraWhere();
 
-                    if (cmbUser.Text != "All Users")
-                    {
+                    if (HasUserFilter())
                         orderWhere += " AND o.created_by=@user";
-                        extraWhere += " AND o.created_by=@user";
-                    }
-
-                    string orderSaleWhere = orderWhere + ExtraOrderExcludeClause();
 
                     decimal orderSale = 0;
                     int orderCount = 0;
@@ -403,7 +464,7 @@ namespace BubbyPlanetShowroom
                         conn))
                     {
                         AddPeriodParams(cmd);
-                        if (cmbUser.Text != "All Users")
+                        if (HasUserFilter())
                             cmd.Parameters.AddWithValue("@user", cmbUser.Text);
 
                         object countValue = cmd.ExecuteScalar();
@@ -415,11 +476,11 @@ namespace BubbyPlanetShowroom
                     using (MySqlCommand cmd = new MySqlCommand(
                         @"SELECT IFNULL(SUM(grand_total),0)
                           FROM inv_orders o
-                          WHERE " + orderSaleWhere,
+                          WHERE " + orderWhere,
                         conn))
                     {
                         AddPeriodParams(cmd);
-                        if (cmbUser.Text != "All Users")
+                        if (HasUserFilter())
                             cmd.Parameters.AddWithValue("@user", cmbUser.Text);
 
                         object saleValue = cmd.ExecuteScalar();
@@ -428,24 +489,8 @@ namespace BubbyPlanetShowroom
                             : Convert.ToDecimal(saleValue);
                     }
 
-                    decimal extraSale = 0;
-                    using (MySqlCommand cmd = new MySqlCommand(
-                        @"SELECT IFNULL(SUM(s.amount),0)
-                          FROM inv_return_settlements s
-                          INNER JOIN inv_orders o ON o.id = s.order_id
-                          WHERE " + extraWhere,
-                        conn))
-                    {
-                        AddPeriodParams(cmd);
-                        if (cmbUser.Text != "All Users")
-                            cmd.Parameters.AddWithValue("@user", cmbUser.Text);
-
-                        object value = cmd.ExecuteScalar();
-                        extraSale = value == null || value == DBNull.Value ? 0 : Convert.ToDecimal(value);
-                    }
-
                     lblTodayOrders.Text = "Orders : " + orderCount;
-                    lblTodaySale.Text = "Sale : ₹" + SellingCalculations.CombineTotalSale(orderSale, extraSale).ToString("N2");
+                    lblTodaySale.Text = "Sale : ₹" + SellingCalculations.BilledSaleTotal(orderSale).ToString("N2");
                 }
             }
             catch (Exception ex)
@@ -463,55 +508,9 @@ namespace BubbyPlanetShowroom
                 using (MySqlConnection conn = DB.GetConnection())
                 {
                     conn.Open();
-                    DB.EnsureReturnSettlementSchema(conn);
-
-                    string extraWhere = GetExchangeExtraWhere();
-                    if (cmbUser.Text != "All Users")
-                        extraWhere += " AND o.created_by=@user";
-
-                    HashSet<int> extraOrderIds = new HashSet<int>();
-
-                    using (MySqlCommand cmd = new MySqlCommand(
-                        @"SELECT
-                              s.created_at,
-                              s.payment_method,
-                              s.amount,
-                              o.id AS order_id,
-                              o.created_by,
-                              c.first_name,
-                              c.sur_name,
-                              c.phone
-                          FROM inv_return_settlements s
-                          INNER JOIN inv_orders o ON o.id = s.order_id
-                          LEFT JOIN inv_customers c ON c.id = o.customer_id
-                          WHERE " + extraWhere + @"
-                          ORDER BY s.created_at DESC",
-                        conn))
-                    {
-                        AddPeriodParams(cmd);
-                        if (cmbUser.Text != "All Users")
-                            cmd.Parameters.AddWithValue("@user", cmbUser.Text);
-
-                        using MySqlDataReader reader = cmd.ExecuteReader();
-                        while (reader.Read())
-                        {
-                            int extraOrderId = Convert.ToInt32(reader["order_id"]);
-                            extraOrderIds.Add(extraOrderId);
-                            dgvOrders.Rows.Add(
-                                extraOrderId,
-                                "Return extra income",
-                                Convert.ToDateTime(reader["created_at"]).ToString("dd-MM-yyyy HH:mm"),
-                                (reader["first_name"]?.ToString() + " " + reader["sur_name"]?.ToString()).Trim(),
-                                reader["phone"],
-                                reader["payment_method"],
-                                reader["created_by"],
-                                Convert.ToDecimal(reader["amount"]).ToString("N2"),
-                                "ReturnExtra");
-                        }
-                    }
 
                     string orderWhere = GetDateCondition("o.date_added");
-                    if (cmbUser.Text != "All Users")
+                    if (HasUserFilter())
                         orderWhere += " AND o.created_by=@user";
 
                     using (MySqlCommand cmd = new MySqlCommand(
@@ -531,29 +530,33 @@ namespace BubbyPlanetShowroom
                         conn))
                     {
                         AddPeriodParams(cmd);
-                        if (cmbUser.Text != "All Users")
+                        if (HasUserFilter())
                             cmd.Parameters.AddWithValue("@user", cmbUser.Text);
 
                         using MySqlDataReader reader = cmd.ExecuteReader();
                         while (reader.Read())
                         {
-                            int saleOrderId = Convert.ToInt32(reader["id"]);
-                            if (!SellingCalculations.IncludeOrderSaleInTotal(extraOrderIds.Contains(saleOrderId)))
-                                continue;
+                            decimal amount = reader["grand_total"] == DBNull.Value
+                                ? 0
+                                : Convert.ToDecimal(reader["grand_total"]);
 
                             dgvOrders.Rows.Add(
-                                saleOrderId,
+                                reader["id"],
                                 "Sale",
                                 Convert.ToDateTime(reader["date_added"]).ToString("dd-MM-yyyy HH:mm"),
                                 (reader["first_name"]?.ToString() + " " + reader["sur_name"]?.ToString()).Trim(),
                                 reader["phone"],
                                 reader["payment_method"],
                                 reader["created_by"],
-                                reader["grand_total"],
+                                amount.ToString("N2"),
                                 "Sale");
                         }
                     }
                 }
+
+                int billCount = dgvOrders.Rows.Count;
+                if (lblOrdersHint != null)
+                    lblOrdersHint.Text = billCount + " bills in this filter  ·  scroll karke saari dekho";
             }
             catch (Exception ex)
             {
@@ -672,8 +675,10 @@ namespace BubbyPlanetShowroom
 
                     while (reader.Read())
                     {
-                        cmbUser.Items.Add(
-                            reader["created_by"].ToString());
+                        string userName = reader["created_by"]?.ToString();
+                        if (string.IsNullOrWhiteSpace(userName))
+                            continue;
+                        cmbUser.Items.Add(userName);
                     }
                 }
 
@@ -691,48 +696,16 @@ namespace BubbyPlanetShowroom
 
         private void AddPeriodParams(MySqlCommand cmd)
         {
-            DateTime from = DateTime.Today;
-            DateTime to = DateTime.Today;
+            SellingCalculations.ResolveFilterRange(
+                cmbFilter.Text,
+                DateTime.Today,
+                dtFrom.Value,
+                dtTo.Value,
+                out DateTime from,
+                out DateTime to);
 
-            switch (cmbFilter.Text)
-            {
-                case "Weekly":
-                    from = DateTime.Today.AddDays(-(int)DateTime.Today.DayOfWeek);
-                    to = from.AddDays(6);
-                    break;
-                case "Monthly":
-                    from = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
-                    to = from.AddMonths(1).AddDays(-1);
-                    break;
-                case "Yearly":
-                    from = new DateTime(DateTime.Today.Year, 1, 1);
-                    to = new DateTime(DateTime.Today.Year, 12, 31);
-                    break;
-                case "Custom":
-                    from = dtFrom.Value.Date;
-                    to = dtTo.Value.Date;
-                    break;
-            }
-
-            cmd.Parameters.AddWithValue("@fromDate", from);
-            cmd.Parameters.AddWithValue("@toDate", to);
-        }
-
-        private string ExtraOrderExcludeClause()
-        {
-            return @"
-                  AND o.id NOT IN (
-                      SELECT s.order_id
-                      FROM inv_return_settlements s
-                      WHERE LOWER(TRIM(s.settlement_type)) = 'collect'
-                        AND " + GetDateCondition("s.created_at") + @"
-                  )";
-        }
-
-        private string GetExchangeExtraWhere()
-        {
-            return @"LOWER(TRIM(s.settlement_type)) = 'collect'
-                  AND " + GetDateCondition("s.created_at");
+            cmd.Parameters.AddWithValue("@fromDate", from.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("@toDate", to.ToString("yyyy-MM-dd"));
         }
     }
 }

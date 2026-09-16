@@ -5,7 +5,9 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net6.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,5 +22,6 @@
     <EmbeddedResource Remove="BubbyPlanetShowroom.Tests\**" />
     <None Remove="BubbyPlanetShowroom.Tests\**" />
   </ItemGroup>
+
 
 </Project>

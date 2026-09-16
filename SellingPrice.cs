@@ -26,6 +26,7 @@ namespace BubbyPlanetShowroom
         private TextBox txtTransport;
         private TextBox txtQty;
         private TextBox txtItemPrice;
+        private TextBox txtDiscount;
         private TextBox txtRent;
         private TextBox txtSalary;
         private TextBox txtExpectedSales;
@@ -47,7 +48,7 @@ namespace BubbyPlanetShowroom
         {
             string currentRole = (role ?? "").Trim();
             canUsePage = currentRole is "Master Admin" or "Admin";
-            canEditSettings = string.Equals(currentRole, "Master Admin", StringComparison.OrdinalIgnoreCase);
+            canEditSettings = currentRole is "Master Admin" or "Admin";
             InitializeUI();
             Load += (_, _) =>
             {
@@ -121,8 +122,8 @@ namespace BubbyPlanetShowroom
             calcPage.Padding = new Padding(0, 8, 0, 0);
             settingsPage.Padding = new Padding(0, 8, 0, 0);
             calcPage.Controls.Add(BuildCalculatorTab());
-            settingsPage.Controls.Add(BuildSettingsTab());
             tabs.TabPages.Add(calcPage);
+            settingsPage.Controls.Add(BuildSettingsTab());
             tabs.TabPages.Add(settingsPage);
             root.Controls.Add(tabs, 0, 1);
 
@@ -178,12 +179,22 @@ namespace BubbyPlanetShowroom
             txtTransport = NumberBox(allowDecimal: true, placeholder: "e.g. 100");
             txtQty = NumberBox(allowDecimal: false, placeholder: "e.g. 10");
             txtItemPrice = NumberBox(allowDecimal: true, placeholder: "e.g. 50");
+            txtDiscount = NumberBox(allowDecimal: true, placeholder: "0");
             txtRent = NumberBox(allowDecimal: true, placeholder: "30000");
             txtSalary = NumberBox(allowDecimal: true, placeholder: "30000");
             txtExpectedSales = NumberBox(allowDecimal: false, placeholder: "3000");
             txtEnding = NumberBox(allowDecimal: false, placeholder: "9");
+            txtRent.ReadOnly = true;
+            txtSalary.ReadOnly = true;
+            txtExpectedSales.ReadOnly = true;
+            txtEnding.ReadOnly = true;
+            txtRent.BackColor = Color.FromArgb(241, 245, 249);
+            txtSalary.BackColor = Color.FromArgb(241, 245, 249);
+            txtExpectedSales.BackColor = Color.FromArgb(241, 245, 249);
+            txtEnding.BackColor = Color.FromArgb(241, 245, 249);
 
             suppressCalc = true;
+            txtDiscount.Text = "0";
             txtRent.Text = "30000";
             txtSalary.Text = "30000";
             txtExpectedSales.Text = "3000";
@@ -197,7 +208,7 @@ namespace BubbyPlanetShowroom
             Label overheadTitle = new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "MONTHLY  ·  default Rent ₹30,000  ·  Salary ₹30,000  ·  Items sold 3,000",
+                Text = "MONTHLY  ·  Pricing Settings se saved rent / salary / items sold",
                 Font = new Font("Segoe UI", 8f, FontStyle.Bold),
                 ForeColor = Teal,
                 TextAlign = ContentAlignment.BottomLeft
@@ -269,17 +280,18 @@ namespace BubbyPlanetShowroom
             Panel resultCard = CreateCard();
             resultCard.Padding = new Padding(1);
             resultCard.Margin = new Padding(0);
-            Panel resultHeader = CreateSectionHeader("FULL CALCULATION", "Per piece rate + profit + transport/piece + rent + salary  ·  round up to ending 9");
+            Panel resultHeader = CreateSectionHeader("FULL CALCULATION", "Selling price settings se banti hai  ·  right side discount sirf check ke liye hai");
 
             TableLayoutPanel resultBody = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 2,
+                RowCount = 3,
                 BackColor = Color.White,
                 Padding = new Padding(12)
             };
             resultBody.RowStyles.Add(new RowStyle(SizeType.Absolute, 108f));
+            resultBody.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));
             resultBody.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             TableLayoutPanel summary = new TableLayoutPanel
@@ -294,12 +306,13 @@ namespace BubbyPlanetShowroom
             lblFinalPrice = new Label { Text = "₹—" };
             lblActualProfit = new Label { Text = "₹0.00" };
             summary.Controls.Add(CreateStatCard("SELLING PRICE", lblFinalPrice, Color.FromArgb(254, 243, 199), Gold), 0, 0);
-            summary.Controls.Add(CreateStatCard("ACTUAL PROFIT / PIECE", lblActualProfit, Color.FromArgb(186, 230, 253), Sky), 1, 0);
+            summary.Controls.Add(CreateStatCard("PROFIT / PIECE AFTER DISCOUNT", lblActualProfit, Color.FromArgb(186, 230, 253), Sky), 1, 0);
 
             dgvBreakdown = CreateBreakdownGrid();
 
             resultBody.Controls.Add(summary, 0, 0);
-            resultBody.Controls.Add(dgvBreakdown, 0, 1);
+            resultBody.Controls.Add(BuildDiscountCheckBar(), 0, 1);
+            resultBody.Controls.Add(dgvBreakdown, 0, 2);
 
             resultCard.Controls.Add(resultBody);
             resultCard.Controls.Add(resultHeader);
@@ -317,7 +330,7 @@ namespace BubbyPlanetShowroom
             card.Margin = new Padding(0);
             Panel header = CreateSectionHeader(
                 "PRICING SETTINGS",
-                canEditSettings ? "Master Admin — saved values apply to future calculations" : "Read-only — only Master Admin can change these");
+                "Admin and Master Admin — saved values apply to every calculation");
 
             TableLayoutPanel body = new TableLayoutPanel
             {
@@ -428,6 +441,11 @@ namespace BubbyPlanetShowroom
             dgvSlabs.ReadOnly = !enabled;
             dgvSlabs.AllowUserToAddRows = enabled;
             dgvSlabs.AllowUserToDeleteRows = enabled;
+            dgvSlabs.CurrentCellDirtyStateChanged += (_, _) =>
+            {
+                if (dgvSlabs.IsCurrentCellDirty)
+                    dgvSlabs.CommitEdit(DataGridViewDataErrorContexts.Commit);
+            };
             btnSave.Enabled = enabled;
             btnDefaults.Enabled = enabled;
 
@@ -483,6 +501,9 @@ namespace BubbyPlanetShowroom
 
         private void BindSlabs(List<ProfitMarginSlab> slabs)
         {
+            if (dgvSlabs == null)
+                return;
+
             dgvSlabs.Rows.Clear();
             foreach (ProfitMarginSlab slab in slabs)
             {
@@ -519,10 +540,11 @@ namespace BubbyPlanetShowroom
 
             try
             {
+                CommitSlabEdits();
                 PricingSettings next = ReadSettingsFromForm();
                 PricingSettingsStore.Save(next);
                 settings = next;
-                UpdateSettingsHint();
+                ApplySettingsToForm();
                 Recalculate(true);
                 lblStatus.Text = "Pricing settings saved. Future calculations will use these values.";
                 MessageBox.Show("Pricing settings saved.", "Selling Price", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -560,9 +582,48 @@ namespace BubbyPlanetShowroom
             Recalculate(false);
         }
 
+        private void CommitSlabEdits()
+        {
+            if (dgvSlabs == null || dgvSlabs.IsDisposed)
+                return;
+            try
+            {
+                dgvSlabs.EndEdit();
+                if (dgvSlabs.IsCurrentCellDirty)
+                    dgvSlabs.CommitEdit(DataGridViewDataErrorContexts.Commit);
+            }
+            catch
+            {
+                // Grid may not be on screen yet.
+            }
+        }
+
         private PricingSettings ReadSettingsFromForm()
         {
+            CommitSlabEdits();
+            List<ProfitMarginSlab> slabs = ReadSlabsFromGrid();
+            if (slabs.Count == 0)
+                throw new InvalidOperationException("Add at least one profit-margin slab.");
+
+            return new PricingSettings
+            {
+                MonthlyRent = nudRent?.Value ?? ReadMoney(txtRent, settings.MonthlyRent),
+                MonthlySalary = nudSalary?.Value ?? ReadMoney(txtSalary, settings.MonthlySalary),
+                ExpectedMonthlySales = nudExpectedSales?.Value ?? ReadMoney(txtExpectedSales, settings.ExpectedMonthlySales),
+                DiscountPercent = 0m,
+                PriceEndingDigit = nudEnding != null ? (int)nudEnding.Value : ReadEndingDigit(),
+                TotalTransportCost = 0m,
+                TotalParcelQuantity = 1,
+                Slabs = slabs
+            };
+        }
+
+        private List<ProfitMarginSlab> ReadSlabsFromGrid()
+        {
             List<ProfitMarginSlab> slabs = new List<ProfitMarginSlab>();
+            if (dgvSlabs == null)
+                return slabs;
+
             foreach (DataGridViewRow row in dgvSlabs.Rows)
             {
                 if (row.IsNewRow)
@@ -596,6 +657,10 @@ namespace BubbyPlanetShowroom
                 if (margin < 0m)
                     throw new InvalidOperationException("Profit margin cannot be negative.");
 
+                // Skip the unused "new row" leftover (0 / blank / 0%).
+                if (min == 0m && max == null && margin == 0m)
+                    continue;
+
                 slabs.Add(new ProfitMarginSlab
                 {
                     MinPurchaseCost = min,
@@ -604,20 +669,7 @@ namespace BubbyPlanetShowroom
                 });
             }
 
-            if (slabs.Count == 0)
-                throw new InvalidOperationException("Add at least one profit-margin slab.");
-
-            return new PricingSettings
-            {
-                MonthlyRent = ReadMoney(txtRent, settings.MonthlyRent),
-                MonthlySalary = ReadMoney(txtSalary, settings.MonthlySalary),
-                ExpectedMonthlySales = ReadMoney(txtExpectedSales, settings.ExpectedMonthlySales),
-                DiscountPercent = 0m,
-                PriceEndingDigit = ReadEndingDigit(),
-                TotalTransportCost = 0m,
-                TotalParcelQuantity = 1,
-                Slabs = slabs
-            };
+            return slabs;
         }
 
         private void Recalculate(bool showError)
@@ -625,10 +677,13 @@ namespace BubbyPlanetShowroom
             if (suppressCalc)
                 return;
 
-            if (!TryGetItemInputs(out decimal perPieceRate, out int quantity, out decimal itemTransportCost))
+            if (showError)
+                RefreshSavedSettings(showError: false);
+
+            if (!TryGetItemInputs(out decimal perPieceRate, out int quantity, out decimal itemTransportCost, out decimal discountPercent))
             {
                 if (showError)
-                    MessageBox.Show("Enter this item's transport (0 allowed), quantity, and per piece rate.", "Selling Price", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show("Enter this item's transport (0 allowed), quantity, per piece rate, and discount % (0 allowed).", "Selling Price", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -639,7 +694,8 @@ namespace BubbyPlanetShowroom
                     perPieceRate,
                     quantity,
                     working,
-                    itemTransportCost);
+                    itemTransportCost,
+                    discountPercent);
 
                 string selling = "₹" + result.FinalSellingPrice.ToString("0");
                 lblFinalPrice.Text = selling;
@@ -649,7 +705,9 @@ namespace BubbyPlanetShowroom
                 RenderBreakdown(result);
                 UpdateSettingsHint();
                 if (showError)
-                    lblStatus.Text = "Selling price: " + selling;
+                    lblStatus.Text = discountPercent > 0m
+                        ? $"Selling {selling}  ·  after {discountPercent:0.##}% discount customer ₹{result.CustomerPayable:0.00}  ·  profit ₹{result.ActualProfit:0.00}"
+                        : "Selling price: " + selling;
             }
             catch (Exception ex)
             {
@@ -658,11 +716,12 @@ namespace BubbyPlanetShowroom
             }
         }
 
-        private bool TryGetItemInputs(out decimal perPieceRate, out int quantity, out decimal itemTransportCost)
+        private bool TryGetItemInputs(out decimal perPieceRate, out int quantity, out decimal itemTransportCost, out decimal discountPercent)
         {
             perPieceRate = 0;
             quantity = 0;
             itemTransportCost = 0;
+            discountPercent = 0;
 
             string transportText = (txtTransport.Text ?? "").Trim();
             if (string.IsNullOrEmpty(transportText))
@@ -675,18 +734,39 @@ namespace BubbyPlanetShowroom
             if (!TryParseDecimal(txtItemPrice.Text, out perPieceRate) || perPieceRate < 0m)
                 return false;
 
+            string discountText = (txtDiscount.Text ?? "").Trim();
+            if (string.IsNullOrEmpty(discountText))
+                discountPercent = 0m;
+            else if (!TryParseDecimal(discountText, out discountPercent) || discountPercent < 0m || discountPercent > 100m)
+                return false;
+
             return true;
+        }
+
+        private void RefreshSavedSettings(bool showError)
+        {
+            try
+            {
+                settings = PricingSettingsStore.Load();
+                ApplySettingsToForm();
+            }
+            catch (Exception ex)
+            {
+                if (showError)
+                    MessageBox.Show("Could not load saved pricing settings.\n" + ex.Message, "Selling Price", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
         private PricingSettings GetWorkingSettings()
         {
+            // Always the last saved DB slabs so Admin and Master Admin calculate the same.
             return new PricingSettings
             {
-                MonthlyRent = ReadMoney(txtRent, settings.MonthlyRent),
-                MonthlySalary = ReadMoney(txtSalary, settings.MonthlySalary),
-                ExpectedMonthlySales = ReadMoney(txtExpectedSales, settings.ExpectedMonthlySales),
+                MonthlyRent = settings.MonthlyRent,
+                MonthlySalary = settings.MonthlySalary,
+                ExpectedMonthlySales = settings.ExpectedMonthlySales,
                 DiscountPercent = 0m,
-                PriceEndingDigit = ReadEndingDigit(),
+                PriceEndingDigit = settings.PriceEndingDigit,
                 TotalTransportCost = 0m,
                 TotalParcelQuantity = 1,
                 Slabs = settings.Slabs
@@ -771,15 +851,25 @@ namespace BubbyPlanetShowroom
                 "₹" + result.FinalSellingPrice.ToString("0"),
                 emphasize: true);
             AddStep(
-                "11. Actual cost (no profit)",
-                "₹" + result.PurchaseCostPerPiece.ToString("0.00")
-                    + " + ₹" + result.TransportPerPiece.ToString("0.00")
-                    + " + ₹" + result.RentPerPiece.ToString("0.00")
-                    + " + ₹" + result.SalaryPerPiece.ToString("0.00"),
+                "11. Mall discount",
+                "₹" + result.FinalSellingPrice.ToString("0") + " × " + result.DiscountPercent.ToString("0.##") + "%",
+                "₹" + result.DiscountAmount.ToString("0.00"));
+            AddStep(
+                "12. Customer pays (after discount)",
+                "₹" + result.FinalSellingPrice.ToString("0") + " − ₹" + result.DiscountAmount.ToString("0.00"),
+                "₹" + result.CustomerPayable.ToString("0.00"),
+                emphasize: true);
+            AddStep(
+                "13. Actual cost / piece",
+                "item ₹" + result.PurchaseCostPerPiece.ToString("0.00")
+                    + " + transport ₹" + result.TransportPerPiece.ToString("0.00")
+                    + " + rent ₹" + result.RentPerPiece.ToString("0.00")
+                    + " + salary ₹" + result.SalaryPerPiece.ToString("0.00"),
                 "₹" + result.ActualTotalCost.ToString("0.00"));
             AddStep(
-                "12. Actual profit / piece",
-                "₹" + result.FinalSellingPrice.ToString("0") + " − ₹" + result.ActualTotalCost.ToString("0.00"),
+                "14. Actual profit / piece",
+                "customer ₹" + result.CustomerPayable.ToString("0.00")
+                    + " − cost ₹" + result.ActualTotalCost.ToString("0.00"),
                 "₹" + result.ActualProfit.ToString("0.00"),
                 emphasize: true);
         }
@@ -876,6 +966,7 @@ namespace BubbyPlanetShowroom
             txtTransport.Text = "";
             txtQty.Text = "";
             txtItemPrice.Text = "";
+            txtDiscount.Text = "0";
             suppressCalc = false;
 
             if (lblSellingPrice != null)
@@ -910,6 +1001,47 @@ namespace BubbyPlanetShowroom
                 ForeColor = Slate
             }, col, row);
             grid.Controls.Add(field, col + 1, row);
+        }
+
+        private Control BuildDiscountCheckBar()
+        {
+            TableLayoutPanel bar = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 3,
+                RowCount = 1,
+                BackColor = Color.FromArgb(240, 253, 250),
+                Padding = new Padding(10, 6, 10, 6),
+                Margin = new Padding(0, 0, 0, 8)
+            };
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90f));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+
+            Label title = new Label
+            {
+                Text = "Mall discount %  (check only)",
+                AutoSize = true,
+                Anchor = AnchorStyles.Left,
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                ForeColor = Slate,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            txtDiscount.Font = new Font("Segoe UI", 12f, FontStyle.Bold);
+            txtDiscount.Margin = new Padding(8, 2, 8, 2);
+            Label hint = new Label
+            {
+                Text = "0 = no discount. 15 likho to customer 15% kam dega — selling price same rahegi, profit turant update hoga.",
+                Dock = DockStyle.Fill,
+                Font = new Font("Segoe UI", 8f),
+                ForeColor = Muted,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+
+            bar.Controls.Add(title, 0, 0);
+            bar.Controls.Add(txtDiscount, 1, 0);
+            bar.Controls.Add(hint, 2, 0);
+            return bar;
         }
 
         private TextBox NumberBox(bool allowDecimal, string placeholder)

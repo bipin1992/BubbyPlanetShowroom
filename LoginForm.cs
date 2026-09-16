@@ -43,6 +43,7 @@ namespace BubbyPlanetShowroom
         public LoginForm()
         {
             InitializeComponent();
+            AppIcon.Apply(this);
 
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedDialog;

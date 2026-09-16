@@ -29,3 +29,7 @@ CREATE TABLE IF NOT EXISTS pricing_profit_slabs
     sort_order INT NOT NULL DEFAULT 0,
     INDEX ix_pricing_profit_slabs_sort (sort_order, min_purchase_cost)
 );
+
+-- Default slabs (also seeded by DB.EnsurePricingSchema):
+-- 0-50, 50-100, 100-200, 200-300, 300-400, 400-500 @ 45%
+-- then 500-1000 @ 40%, 1000-1500 @ 35%, 1500-2000 @ 30%, 2000+ @ 25%

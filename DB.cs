@@ -260,34 +260,108 @@ CREATE TABLE IF NOT EXISTS pricing_profit_slabs
             using (MySqlCommand countCmd = new MySqlCommand("SELECT COUNT(*) FROM pricing_profit_slabs", conn))
             {
                 long count = Convert.ToInt64(countCmd.ExecuteScalar() ?? 0);
-                if (count == 0)
+                if (count == 0 || PricingSlabsAreAllZero(conn))
                 {
-                    using MySqlCommand cmd = new MySqlCommand(
-                        @"INSERT INTO pricing_profit_slabs (min_purchase_cost, max_purchase_cost, margin_percent, sort_order)
-                          VALUES
-                            (0,    500,  45, 0),
-                            (500,  1000, 40, 1),
-                            (1000, 1500, 35, 2),
-                            (1500, 2000, 30, 3),
-                            (2000, NULL, 25, 4)",
-                        conn);
-                    cmd.ExecuteNonQuery();
-                    return;
+                    using (MySqlCommand clear = new MySqlCommand("DELETE FROM pricing_profit_slabs", conn))
+                        clear.ExecuteNonQuery();
+                    InsertDefaultPricingSlabs(conn);
+                }
+                else
+                {
+                    SplitLegacyZeroToFiveHundredSlab(conn);
                 }
             }
+        }
 
-            string[] slabUpdates =
+        private static bool PricingSlabsAreAllZero(MySqlConnection conn)
+        {
+            using MySqlCommand cmd = new MySqlCommand(
+                "SELECT COUNT(*) FROM pricing_profit_slabs WHERE margin_percent <> 0",
+                conn);
+            return Convert.ToInt64(cmd.ExecuteScalar() ?? 0) == 0;
+        }
+
+        private static bool HasFineLowSlabs(MySqlConnection conn)
+        {
+            using MySqlCommand cmd = new MySqlCommand(
+                @"SELECT COUNT(*) FROM pricing_profit_slabs
+                  WHERE min_purchase_cost = 0 AND max_purchase_cost = 50",
+                conn);
+            return Convert.ToInt64(cmd.ExecuteScalar() ?? 0) > 0;
+        }
+
+        private static void SplitLegacyZeroToFiveHundredSlab(MySqlConnection conn)
+        {
+            if (HasFineLowSlabs(conn))
+                return;
+
+            decimal lowMargin = 45m;
+            using (MySqlCommand find = new MySqlCommand(
+                @"SELECT margin_percent FROM pricing_profit_slabs
+                  WHERE min_purchase_cost = 0 AND max_purchase_cost = 500
+                  LIMIT 1",
+                conn))
             {
-                "UPDATE pricing_profit_slabs SET margin_percent = 45 WHERE min_purchase_cost = 0 AND max_purchase_cost = 500",
-                "UPDATE pricing_profit_slabs SET margin_percent = 40 WHERE min_purchase_cost = 500 AND max_purchase_cost = 1000",
-                "UPDATE pricing_profit_slabs SET margin_percent = 35 WHERE min_purchase_cost = 1000 AND max_purchase_cost = 1500",
-                "UPDATE pricing_profit_slabs SET margin_percent = 30 WHERE min_purchase_cost = 1500 AND max_purchase_cost = 2000",
-                "UPDATE pricing_profit_slabs SET margin_percent = 25 WHERE min_purchase_cost = 2000 AND max_purchase_cost IS NULL"
+                object? value = find.ExecuteScalar();
+                if (value == null || value == DBNull.Value)
+                    return;
+                lowMargin = Convert.ToDecimal(value);
+                if (lowMargin <= 0m)
+                    lowMargin = 45m;
+            }
+
+            using (MySqlCommand delete = new MySqlCommand(
+                @"DELETE FROM pricing_profit_slabs
+                  WHERE min_purchase_cost = 0 AND max_purchase_cost = 500",
+                conn))
+                delete.ExecuteNonQuery();
+
+            using (MySqlCommand bump = new MySqlCommand(
+                "UPDATE pricing_profit_slabs SET sort_order = sort_order + 6",
+                conn))
+                bump.ExecuteNonQuery();
+
+            decimal[,] bands =
+            {
+                { 0m, 50m },
+                { 50m, 100m },
+                { 100m, 200m },
+                { 200m, 300m },
+                { 300m, 400m },
+                { 400m, 500m }
             };
-            foreach (string sql in slabUpdates)
+            for (int i = 0; i < bands.GetLength(0); i++)
             {
-                using MySqlCommand updateSlabs = new MySqlCommand(sql, conn);
-                updateSlabs.ExecuteNonQuery();
+                using MySqlCommand insert = new MySqlCommand(
+                    @"INSERT INTO pricing_profit_slabs
+                        (min_purchase_cost, max_purchase_cost, margin_percent, sort_order)
+                      VALUES
+                        (@min, @max, @margin, @sort)",
+                    conn);
+                insert.Parameters.AddWithValue("@min", bands[i, 0]);
+                insert.Parameters.AddWithValue("@max", bands[i, 1]);
+                insert.Parameters.AddWithValue("@margin", lowMargin);
+                insert.Parameters.AddWithValue("@sort", i);
+                insert.ExecuteNonQuery();
+            }
+        }
+
+        private static void InsertDefaultPricingSlabs(MySqlConnection conn)
+        {
+            int order = 0;
+            foreach (ProfitMarginSlab slab in PricingSettings.CreateDefaultSlabs())
+            {
+                using MySqlCommand cmd = new MySqlCommand(
+                    @"INSERT INTO pricing_profit_slabs
+                        (min_purchase_cost, max_purchase_cost, margin_percent, sort_order)
+                      VALUES
+                        (@min, @max, @margin, @sort)",
+                    conn);
+                cmd.Parameters.AddWithValue("@min", slab.MinPurchaseCost);
+                cmd.Parameters.AddWithValue("@max", (object?)slab.MaxPurchaseCost ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@margin", slab.MarginPercent);
+                cmd.Parameters.AddWithValue("@sort", order++);
+                cmd.ExecuteNonQuery();
             }
         }
 

@@ -41,6 +41,11 @@ namespace BubbyPlanetShowroom.Tests
 
         [Theory]
         [InlineData(0, 45)]
+        [InlineData(10, 45)]
+        [InlineData(49.99, 45)]
+        [InlineData(50, 45)]
+        [InlineData(199.99, 45)]
+        [InlineData(400, 45)]
         [InlineData(499.99, 45)]
         [InlineData(500, 40)]
         [InlineData(999.99, 40)]
@@ -157,6 +162,61 @@ namespace BubbyPlanetShowroom.Tests
             Assert.Equal(689m, result.CustomerPayable);
             Assert.Equal(480.20m, result.ActualTotalCost);
             Assert.Equal(208.80m, result.ActualProfit);
+        }
+
+        [Fact]
+        public void Calculate_MallDiscountReducesProfit_DefaultZeroUnchanged()
+        {
+            SellingPriceResult none = SellingPriceCalculations.Calculate(
+                perPieceRate: 500m,
+                quantity: 1,
+                settings: ExampleSettings(),
+                discountPercent: 0m);
+
+            SellingPriceResult fifteen = SellingPriceCalculations.Calculate(
+                perPieceRate: 500m,
+                quantity: 1,
+                settings: ExampleSettings(),
+                discountPercent: 15m);
+
+            Assert.Equal(729m, none.FinalSellingPrice);
+            Assert.Equal(729m, none.CustomerPayable);
+            Assert.Equal(209.00m, none.ActualProfit);
+
+            Assert.Equal(729m, fifteen.FinalSellingPrice);
+            Assert.Equal(15m, fifteen.DiscountPercent);
+            Assert.Equal(109.35m, fifteen.DiscountAmount);
+            Assert.Equal(619.65m, fifteen.CustomerPayable);
+            Assert.Equal(520.00m, fifteen.ActualTotalCost);
+            Assert.Equal(99.65m, fifteen.ActualProfit);
+        }
+
+        [Fact]
+        public void Calculate_UsesSavedCustomSlabs_NotDefaults()
+        {
+            PricingSettings saved = PricingSettings.CreateDefaults();
+            saved.Slabs = new System.Collections.Generic.List<ProfitMarginSlab>
+            {
+                new ProfitMarginSlab { MinPurchaseCost = 0m, MaxPurchaseCost = 50m, MarginPercent = 30m },
+                new ProfitMarginSlab { MinPurchaseCost = 50m, MaxPurchaseCost = 100m, MarginPercent = 30m },
+                new ProfitMarginSlab { MinPurchaseCost = 100m, MaxPurchaseCost = 500m, MarginPercent = 35m },
+                new ProfitMarginSlab { MinPurchaseCost = 500m, MaxPurchaseCost = 1500m, MarginPercent = 40m },
+                new ProfitMarginSlab { MinPurchaseCost = 1500m, MaxPurchaseCost = 2000m, MarginPercent = 25m },
+                new ProfitMarginSlab { MinPurchaseCost = 2000m, MaxPurchaseCost = null, MarginPercent = 20m }
+            };
+
+            Assert.Equal(30m, SellingPriceCalculations.GetMarginPercent(10m, saved.Slabs));
+            Assert.Equal(35m, SellingPriceCalculations.GetMarginPercent(200m, saved.Slabs));
+            Assert.Equal(40m, SellingPriceCalculations.GetMarginPercent(500m, saved.Slabs));
+            Assert.Equal(20m, SellingPriceCalculations.GetMarginPercent(2500m, saved.Slabs));
+
+            SellingPriceResult result = SellingPriceCalculations.Calculate(
+                perPieceRate: 10m,
+                quantity: 1,
+                settings: saved);
+
+            Assert.Equal(30m, result.ProfitMarginPercent);
+            Assert.Equal(3.00m, result.ProfitPerPiece);
         }
 
         [Fact]

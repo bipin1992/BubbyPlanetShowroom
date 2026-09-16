@@ -21,6 +21,7 @@ namespace BubbyPlanetShowroom
         private BackupProgressForm()
         {
             Text = "Database Backup";
+            AppIcon.Apply(this);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             ControlBox = false;

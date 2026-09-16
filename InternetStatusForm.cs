@@ -11,6 +11,7 @@ namespace BubbyPlanetShowroom
         public InternetStatusForm()
         {
             Text = "Internet Disconnected";
+            AppIcon.Apply(this);
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
