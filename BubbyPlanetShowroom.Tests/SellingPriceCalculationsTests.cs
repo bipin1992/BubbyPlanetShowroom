@@ -192,6 +192,34 @@ namespace BubbyPlanetShowroom.Tests
         }
 
         [Fact]
+        public void Calculate_UsesSavedCustomSlabs_NotDefaults()
+        {
+            PricingSettings saved = PricingSettings.CreateDefaults();
+            saved.Slabs = new System.Collections.Generic.List<ProfitMarginSlab>
+            {
+                new ProfitMarginSlab { MinPurchaseCost = 0m, MaxPurchaseCost = 50m, MarginPercent = 30m },
+                new ProfitMarginSlab { MinPurchaseCost = 50m, MaxPurchaseCost = 100m, MarginPercent = 30m },
+                new ProfitMarginSlab { MinPurchaseCost = 100m, MaxPurchaseCost = 500m, MarginPercent = 35m },
+                new ProfitMarginSlab { MinPurchaseCost = 500m, MaxPurchaseCost = 1500m, MarginPercent = 40m },
+                new ProfitMarginSlab { MinPurchaseCost = 1500m, MaxPurchaseCost = 2000m, MarginPercent = 25m },
+                new ProfitMarginSlab { MinPurchaseCost = 2000m, MaxPurchaseCost = null, MarginPercent = 20m }
+            };
+
+            Assert.Equal(30m, SellingPriceCalculations.GetMarginPercent(10m, saved.Slabs));
+            Assert.Equal(35m, SellingPriceCalculations.GetMarginPercent(200m, saved.Slabs));
+            Assert.Equal(40m, SellingPriceCalculations.GetMarginPercent(500m, saved.Slabs));
+            Assert.Equal(20m, SellingPriceCalculations.GetMarginPercent(2500m, saved.Slabs));
+
+            SellingPriceResult result = SellingPriceCalculations.Calculate(
+                perPieceRate: 10m,
+                quantity: 1,
+                settings: saved);
+
+            Assert.Equal(30m, result.ProfitMarginPercent);
+            Assert.Equal(3.00m, result.ProfitPerPiece);
+        }
+
+        [Fact]
         public void Calculate_RejectsZeroQuantity()
         {
             Assert.Throws<ArgumentOutOfRangeException>(() =>

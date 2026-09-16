@@ -48,7 +48,7 @@ namespace BubbyPlanetShowroom
         {
             string currentRole = (role ?? "").Trim();
             canUsePage = currentRole is "Master Admin" or "Admin";
-            canEditSettings = string.Equals(currentRole, "Master Admin", StringComparison.OrdinalIgnoreCase);
+            canEditSettings = currentRole is "Master Admin" or "Admin";
             InitializeUI();
             Load += (_, _) =>
             {
@@ -123,11 +123,8 @@ namespace BubbyPlanetShowroom
             settingsPage.Padding = new Padding(0, 8, 0, 0);
             calcPage.Controls.Add(BuildCalculatorTab());
             tabs.TabPages.Add(calcPage);
-            if (canEditSettings)
-            {
-                settingsPage.Controls.Add(BuildSettingsTab());
-                tabs.TabPages.Add(settingsPage);
-            }
+            settingsPage.Controls.Add(BuildSettingsTab());
+            tabs.TabPages.Add(settingsPage);
             root.Controls.Add(tabs, 0, 1);
 
             lblStatus = new Label
@@ -187,6 +184,14 @@ namespace BubbyPlanetShowroom
             txtSalary = NumberBox(allowDecimal: true, placeholder: "30000");
             txtExpectedSales = NumberBox(allowDecimal: false, placeholder: "3000");
             txtEnding = NumberBox(allowDecimal: false, placeholder: "9");
+            txtRent.ReadOnly = true;
+            txtSalary.ReadOnly = true;
+            txtExpectedSales.ReadOnly = true;
+            txtEnding.ReadOnly = true;
+            txtRent.BackColor = Color.FromArgb(241, 245, 249);
+            txtSalary.BackColor = Color.FromArgb(241, 245, 249);
+            txtExpectedSales.BackColor = Color.FromArgb(241, 245, 249);
+            txtEnding.BackColor = Color.FromArgb(241, 245, 249);
 
             suppressCalc = true;
             txtDiscount.Text = "0";
@@ -203,7 +208,7 @@ namespace BubbyPlanetShowroom
             Label overheadTitle = new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "MONTHLY  ·  default Rent ₹30,000  ·  Salary ₹30,000  ·  Items sold 3,000",
+                Text = "MONTHLY  ·  Pricing Settings se saved rent / salary / items sold",
                 Font = new Font("Segoe UI", 8f, FontStyle.Bold),
                 ForeColor = Teal,
                 TextAlign = ContentAlignment.BottomLeft
@@ -325,7 +330,7 @@ namespace BubbyPlanetShowroom
             card.Margin = new Padding(0);
             Panel header = CreateSectionHeader(
                 "PRICING SETTINGS",
-                canEditSettings ? "Master Admin — saved values apply to future calculations" : "Read-only — only Master Admin can change these");
+                "Admin and Master Admin — saved values apply to every calculation");
 
             TableLayoutPanel body = new TableLayoutPanel
             {
@@ -496,6 +501,9 @@ namespace BubbyPlanetShowroom
 
         private void BindSlabs(List<ProfitMarginSlab> slabs)
         {
+            if (dgvSlabs == null)
+                return;
+
             dgvSlabs.Rows.Clear();
             foreach (ProfitMarginSlab slab in slabs)
             {
@@ -669,6 +677,9 @@ namespace BubbyPlanetShowroom
             if (suppressCalc)
                 return;
 
+            if (showError)
+                RefreshSavedSettings(showError: false);
+
             if (!TryGetItemInputs(out decimal perPieceRate, out int quantity, out decimal itemTransportCost, out decimal discountPercent))
             {
                 if (showError)
@@ -732,36 +743,33 @@ namespace BubbyPlanetShowroom
             return true;
         }
 
+        private void RefreshSavedSettings(bool showError)
+        {
+            try
+            {
+                settings = PricingSettingsStore.Load();
+                ApplySettingsToForm();
+            }
+            catch (Exception ex)
+            {
+                if (showError)
+                    MessageBox.Show("Could not load saved pricing settings.\n" + ex.Message, "Selling Price", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
         private PricingSettings GetWorkingSettings()
         {
-            // Calculate uses last saved/loaded slabs. A blank extra grid row
-            // (min 0, margin 0) must not override the real 45% / 40% slabs.
-            List<ProfitMarginSlab> slabs = settings.Slabs;
-            if (canEditSettings)
-            {
-                try
-                {
-                    CommitSlabEdits();
-                    List<ProfitMarginSlab> fromGrid = ReadSlabsFromGrid();
-                    if (fromGrid.Count > 0 && fromGrid.Exists(s => s.MarginPercent > 0m))
-                        slabs = fromGrid;
-                }
-                catch
-                {
-                    slabs = settings.Slabs;
-                }
-            }
-
+            // Always the last saved DB slabs so Admin and Master Admin calculate the same.
             return new PricingSettings
             {
-                MonthlyRent = ReadMoney(txtRent, settings.MonthlyRent),
-                MonthlySalary = ReadMoney(txtSalary, settings.MonthlySalary),
-                ExpectedMonthlySales = ReadMoney(txtExpectedSales, settings.ExpectedMonthlySales),
+                MonthlyRent = settings.MonthlyRent,
+                MonthlySalary = settings.MonthlySalary,
+                ExpectedMonthlySales = settings.ExpectedMonthlySales,
                 DiscountPercent = 0m,
-                PriceEndingDigit = ReadEndingDigit(),
+                PriceEndingDigit = settings.PriceEndingDigit,
                 TotalTransportCost = 0m,
                 TotalParcelQuantity = 1,
-                Slabs = slabs
+                Slabs = settings.Slabs
             };
         }
 
