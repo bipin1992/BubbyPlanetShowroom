@@ -42,6 +42,7 @@ namespace BubbyPlanetShowroom
         {
             this.Text = "Bubbyplanet Showroom Management";
             this.WindowState = FormWindowState.Maximized;
+            AppIcon.Apply(this);
 
             InitializeLayout();
             CreateMenuButtons();
