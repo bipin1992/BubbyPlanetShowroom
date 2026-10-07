@@ -4,8 +4,8 @@ using System.Collections.Generic;
 namespace BubbyPlanetShowroom
 {
     /// <summary>
-    /// Cash From DB = today's cash bills + return extra/refund that is not
-    /// already inside those bills (same-day cash extra is already in grand_total).
+    /// Cash From DB = today's remaining cash bills + return extra/refund that
+    /// is not already inside those bills.
     /// </summary>
     public static class ClosingCashCalculations
     {
@@ -110,8 +110,8 @@ namespace BubbyPlanetShowroom
 
         /// <summary>
         /// Extra collect increases the drawer. Refund decreases it.
-        /// Same-day extra on a cash bill is already in grand_total (T99 → T399
-        /// bill becomes 339.15, which already includes the 255 extra), so skip it.
+        /// Same-day cash extra/refund is already inside remaining billed sale
+        /// (exchange items raise it; a void/full return zeros it), so skip it.
         /// Extra on an older bill, or cash extra on today's online bill, is added.
         /// Online extra/refund on today's cash bill is NOT in the drawer: extra
         /// paid online must be taken out of cash From DB; online refund means
@@ -155,24 +155,22 @@ namespace BubbyPlanetShowroom
         }
 
         /// <summary>
-        /// After a same-day cash extra collect, the returned T99 is gone.
-        /// Closing lists only the extra (255), not leftover original (84.15).
+        /// Closing lists a settlement only when it actually moves drawer cash
+        /// on top of today's remaining billed sale.
         /// </summary>
-        public static bool HideSaleLineWhenExtraCollected(decimal sameDayCashExtraNet)
+        public static bool IncludeSettlementAsCashLine(decimal cashEffectOnDrawer)
         {
-            return sameDayCashExtraNet > 0;
+            return cashEffectOnDrawer != 0;
         }
 
         /// <summary>
-        /// Cash contribution for one of today's cash bills.
-        /// Extra collect after return → only extra. Otherwise the bill total.
+        /// Cash in the drawer from today's cash bill is the remaining billed
+        /// sale. Same-day cash extra must not hide that remaining total.
         /// </summary>
-        public static decimal CashBillContribution(decimal grandTotal, decimal sameDayCashExtraNet)
+        public static decimal CashBillContribution(decimal billedSale, decimal sameDayCashExtraNet = 0)
         {
-            if (sameDayCashExtraNet > 0)
-                return sameDayCashExtraNet;
-
-            return grandTotal;
+            _ = sameDayCashExtraNet;
+            return billedSale;
         }
 
         public static decimal SignedCashAmount(

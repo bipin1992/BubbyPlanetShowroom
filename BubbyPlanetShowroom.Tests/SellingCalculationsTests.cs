@@ -17,6 +17,13 @@ namespace BubbyPlanetShowroom.Tests
         }
 
         [Fact]
+        public void CouponBill_TotalSaleIsPayableNotItemNets()
+        {
+            Assert.Equal(9.50m, SellingCalculations.BilledSaleTotal(CouponCalculations.BilledSale(49.50m, 40m)));
+            Assert.Equal(1900m, SellingCalculations.BilledSaleTotal(CouponCalculations.BilledSale(2000m, 100m)));
+        }
+
+        [Fact]
         public void SameDayBill_WithoutExtra_CountsGrandTotal()
         {
             Assert.True(SellingCalculations.IncludeOrderSaleInTotal(false));
@@ -119,6 +126,34 @@ namespace BubbyPlanetShowroom.Tests
             Assert.True(SellingCalculations.BillDateInRange(new DateTime(2026, 9, 1), from, to));
             Assert.True(SellingCalculations.BillDateInRange(Today, from, to));
             Assert.False(SellingCalculations.BillDateInRange(new DateTime(2026, 8, 31), from, to));
+        }
+
+        [Fact]
+        public void TodayFilter_IncludesLateNightBillAndExcludesNextMorning()
+        {
+            DateTime today = new DateTime(2026, 9, 19);
+            Assert.True(SellingCalculations.BillDateTimeInFilter(new DateTime(2026, 9, 19, 0, 1, 0), today, today));
+            Assert.True(SellingCalculations.BillDateTimeInFilter(new DateTime(2026, 9, 19, 23, 59, 59), today, today));
+            Assert.False(SellingCalculations.BillDateTimeInFilter(new DateTime(2026, 9, 20, 0, 0, 0), today, today));
+            Assert.False(SellingCalculations.BillDateTimeInFilter(new DateTime(2026, 9, 18, 23, 59, 59), today, today));
+        }
+
+        [Fact]
+        public void MonthlyFilter_IncludesEveryDayInMonth()
+        {
+            DateTime today = new DateTime(2026, 9, 19);
+            SellingCalculations.ResolveFilterRange("Monthly", today, today, today, out DateTime from, out DateTime to);
+            Assert.True(SellingCalculations.BillDateTimeInFilter(new DateTime(2026, 9, 1, 0, 5, 0), from, to));
+            Assert.True(SellingCalculations.BillDateTimeInFilter(new DateTime(2026, 9, 30, 21, 10, 0), from, to));
+            Assert.False(SellingCalculations.BillDateTimeInFilter(new DateTime(2026, 10, 1, 0, 0, 0), from, to));
+        }
+
+        [Fact]
+        public void DiscountPercentLabel_ShowsItemPercentsNotBlendedAverage()
+        {
+            Assert.Equal("10%", SellingCalculations.FormatDiscountPercentLabel("10,10"));
+            Assert.Equal("0% / 10% / 20%", SellingCalculations.FormatDiscountPercentLabel("0,10,20"));
+            Assert.Equal("0%", SellingCalculations.FormatDiscountPercentLabel(""));
         }
     }
 }

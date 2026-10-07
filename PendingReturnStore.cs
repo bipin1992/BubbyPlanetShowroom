@@ -83,6 +83,8 @@ namespace BubbyPlanetShowroom
         /// <summary>collect | refund | empty</summary>
         public string SettlementType { get; set; } = "";
         public decimal SettlementAmount { get; set; }
+        public string CouponCode { get; set; } = "";
+        public decimal CouponShare { get; set; }
         public List<PendingReturnLine> ReturnLines { get; set; } = new();
         public List<PendingExchangeLine> ExchangeLines { get; set; } = new();
         public List<PendingReturnPrintLine> PrintReturnLines { get; set; } = new();

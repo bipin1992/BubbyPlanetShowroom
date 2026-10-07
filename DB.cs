@@ -107,6 +107,42 @@ CREATE TABLE IF NOT EXISTS inv_age_discount_rules
             EnsureColumnExists(conn, "inv_age_discount_rules", "sub_category", "VARCHAR(80) NULL");
             EnsureColumnExists(conn, "inv_age_discount_rules", "gender", "VARCHAR(40) NULL");
             EnsureColumnExists(conn, "inv_age_discount_rules", "staff_only", "TINYINT(1) NOT NULL DEFAULT 0");
+
+            EnsureCouponSchema(conn);
+        }
+
+        public static void EnsureCouponSchema(MySqlConnection conn)
+        {
+            string createCoupons = @"
+CREATE TABLE IF NOT EXISTS inv_coupons
+(
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    coupon_code VARCHAR(40) NOT NULL,
+    title VARCHAR(120) NOT NULL,
+    valid_from DATE NOT NULL,
+    valid_to DATE NOT NULL,
+    min_purchase_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    discount_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    date_added DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_inv_coupons_code (coupon_code)
+);";
+
+            using (var cmd = new MySqlCommand(createCoupons, conn))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            EnsureColumnExists(conn, "inv_coupons", "min_purchase_amount", "DECIMAL(12,2) NOT NULL DEFAULT 0.00");
+            EnsureColumnExists(conn, "inv_coupons", "discount_amount", "DECIMAL(12,2) NOT NULL DEFAULT 0.00");
+        }
+
+        public static void EnsureOrderCouponColumns(MySqlConnection conn)
+        {
+            EnsureColumnExists(conn, "inv_orders", "coupon_code", "VARCHAR(40) NULL");
+            EnsureColumnExists(conn, "inv_orders", "coupon_discount", "DECIMAL(12,2) NOT NULL DEFAULT 0.00");
+            EnsureColumnExists(conn, "inv_orders", "coupon_allocated", "TINYINT(1) NOT NULL DEFAULT 0");
+            EnsureColumnExists(conn, "inv_order_details", "coupon_share", "DECIMAL(12,2) NOT NULL DEFAULT 0.00");
         }
 
         public static void EnsureClosingBalanceSchema(MySqlConnection conn)

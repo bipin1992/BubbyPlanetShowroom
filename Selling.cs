@@ -32,6 +32,7 @@ namespace BubbyPlanetShowroom
         private DataGridView dgvOrders;
         private DataGridView dgvDetails;
         private Label lblOrdersHint;
+        private Label lblDetailsHint;
 
         public Selling()
         {
@@ -225,10 +226,16 @@ namespace BubbyPlanetShowroom
             dgvOrders.Columns.Add("Customer", "Customer");
             dgvOrders.Columns.Add("Mobile", "Mobile");
             dgvOrders.Columns.Add("Payment", "Payment");
-            dgvOrders.Columns.Add("User", "User");
+            dgvOrders.Columns.Add("DiscountPct", "Disc %");
+            dgvOrders.Columns.Add("Discount", "Discount");
+            dgvOrders.Columns.Add("Coupon", "Coupon");
+            dgvOrders.Columns.Add("CreatedBy", "Billed by");
             dgvOrders.Columns.Add("Amount", "Amount");
             dgvOrders.Columns.Add("RowKind", "RowKind");
             dgvOrders.Columns["RowKind"].Visible = false;
+            dgvOrders.Columns["DiscountPct"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+            dgvOrders.Columns["Discount"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+            dgvOrders.Columns["Amount"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
             dgvOrders.SelectionChanged += DgvOrders_SelectionChanged;
             Panel ordersHeaderBar = CreateSectionHeader("ORDERS", "Filter ki saari bills yahan dikhengi", out lblOrdersHint);
             ordersCard.Controls.Add(dgvOrders);
@@ -251,7 +258,7 @@ namespace BubbyPlanetShowroom
             dgvDetails.Columns.Add("Taxable", "Taxable");
             dgvDetails.Columns.Add("GST", "GST");
             dgvDetails.Columns.Add("Total", "Total");
-            Panel detailsHeaderBar = CreateSectionHeader("ORDER DETAILS", "Line items for the selected order", out _);
+            Panel detailsHeaderBar = CreateSectionHeader("ORDER DETAILS", "Line items for the selected order", out lblDetailsHint);
             dgvDetails.Dock = DockStyle.Fill;
             detailsCard.Controls.Add(dgvDetails);
             detailsCard.Controls.Add(detailsHeaderBar);
@@ -448,6 +455,7 @@ namespace BubbyPlanetShowroom
                 using (MySqlConnection conn = DB.GetConnection())
                 {
                     conn.Open();
+                    DB.EnsureOrderCouponColumns(conn);
                     DB.EnsureReturnSettlementSchema(conn);
 
                     string orderWhere = GetDateCondition("o.date_added");
@@ -474,7 +482,7 @@ namespace BubbyPlanetShowroom
                     }
 
                     using (MySqlCommand cmd = new MySqlCommand(
-                        @"SELECT IFNULL(SUM(grand_total),0)
+                        @"SELECT IFNULL(SUM(" + CouponCalculations.SqlOrderBilledSale + @"),0)
                           FROM inv_orders o
                           WHERE " + orderWhere,
                         conn))
@@ -508,6 +516,7 @@ namespace BubbyPlanetShowroom
                 using (MySqlConnection conn = DB.GetConnection())
                 {
                     conn.Open();
+                    DB.EnsureOrderCouponColumns(conn);
 
                     string orderWhere = GetDateCondition("o.date_added");
                     if (HasUserFilter())
@@ -518,13 +527,25 @@ namespace BubbyPlanetShowroom
                               o.id,
                               o.date_added,
                               o.payment_method,
-                              o.grand_total,
-                              o.created_by,
+                              IFNULL(o.coupon_code,'') AS coupon_code,
+                              IFNULL(o.coupon_discount,0) AS coupon_discount,
+                              IFNULL(line.line_discount,0) AS line_discount,
+                              IFNULL(line.discount_pcts,'') AS discount_pcts,
+                              " + CouponCalculations.SqlOrderBilledSale + @" AS billed_sale,
+                              IFNULL(NULLIF(TRIM(o.created_by), ''), '') AS created_by,
                               c.first_name,
                               c.sur_name,
                               c.phone
                           FROM inv_orders o
                           LEFT JOIN inv_customers c ON c.id = o.customer_id
+                          LEFT JOIN (
+                              SELECT
+                                  order_id,
+                                  SUM(IFNULL(discount_amount,0)) AS line_discount,
+                                  GROUP_CONCAT(ROUND(IFNULL(discount_percent,0), 1) SEPARATOR ',') AS discount_pcts
+                              FROM inv_order_details
+                              GROUP BY order_id
+                          ) line ON line.order_id = o.id
                           WHERE " + orderWhere + @"
                           ORDER BY o.id DESC",
                         conn))
@@ -536,9 +557,20 @@ namespace BubbyPlanetShowroom
                         using MySqlDataReader reader = cmd.ExecuteReader();
                         while (reader.Read())
                         {
-                            decimal amount = reader["grand_total"] == DBNull.Value
+                            decimal amount = reader["billed_sale"] == DBNull.Value
                                 ? 0
-                                : Convert.ToDecimal(reader["grand_total"]);
+                                : Convert.ToDecimal(reader["billed_sale"]);
+                            string couponCode = CouponCalculations.NormalizeCode(reader["coupon_code"]?.ToString());
+                            decimal couponDisc = CouponCalculations.ToAmount(reader["coupon_discount"]);
+                            decimal lineDisc = CouponCalculations.ToAmount(reader["line_discount"]);
+                            decimal totalDiscount = Math.Round(lineDisc + couponDisc, 2, MidpointRounding.AwayFromZero);
+                            string discountPct = SellingCalculations.FormatDiscountPercentLabel(reader["discount_pcts"]?.ToString());
+                            string billedBy = reader["created_by"]?.ToString()?.Trim() ?? "";
+                            if (string.IsNullOrWhiteSpace(billedBy))
+                                billedBy = "—";
+                            string couponText = string.IsNullOrWhiteSpace(couponCode)
+                                ? (couponDisc > 0 ? "₹" + couponDisc.ToString("0.00") : "—")
+                                : couponCode + (couponDisc > 0 ? "  ₹" + couponDisc.ToString("0.00") : "");
 
                             dgvOrders.Rows.Add(
                                 reader["id"],
@@ -547,7 +579,10 @@ namespace BubbyPlanetShowroom
                                 (reader["first_name"]?.ToString() + " " + reader["sur_name"]?.ToString()).Trim(),
                                 reader["phone"],
                                 reader["payment_method"],
-                                reader["created_by"],
+                                discountPct,
+                                "₹ " + totalDiscount.ToString("N2"),
+                                couponText,
+                                billedBy,
                                 amount.ToString("N2"),
                                 "Sale");
                         }
@@ -581,12 +616,37 @@ namespace BubbyPlanetShowroom
         private void LoadOrderDetails(int orderId)
         {
             dgvDetails.Rows.Clear();
+            if (lblDetailsHint != null)
+                lblDetailsHint.Text = "Line items for the selected order";
 
             try
             {
                 using (MySqlConnection conn = DB.GetConnection())
                 {
                     conn.Open();
+                    DB.EnsureOrderCouponColumns(conn);
+
+                    string couponCode = "";
+                    decimal couponDisc = 0;
+                    decimal billed = 0;
+                    using (MySqlCommand couponCmd = new MySqlCommand(@"
+                        SELECT
+                            IFNULL(coupon_code,''),
+                            IFNULL(coupon_discount,0),
+                            " + CouponCalculations.SqlOrderBilledSale + @"
+                        FROM inv_orders o
+                        WHERE o.id=@id
+                        LIMIT 1", conn))
+                    {
+                        couponCmd.Parameters.AddWithValue("@id", orderId);
+                        using MySqlDataReader couponReader = couponCmd.ExecuteReader();
+                        if (couponReader.Read())
+                        {
+                            couponCode = CouponCalculations.NormalizeCode(couponReader.GetValue(0)?.ToString());
+                            couponDisc = CouponCalculations.ToAmount(couponReader.GetValue(1));
+                            billed = CouponCalculations.ToAmount(couponReader.GetValue(2));
+                        }
+                    }
 
                     string query = @"
             SELECT
@@ -619,9 +679,7 @@ namespace BubbyPlanetShowroom
                         "@orderId",
                         orderId);
 
-                    MySqlDataReader reader =
-                        cmd.ExecuteReader();
-
+                    using MySqlDataReader reader = cmd.ExecuteReader();
                     while (reader.Read())
                     {
                         dgvDetails.Rows.Add(
@@ -641,6 +699,13 @@ namespace BubbyPlanetShowroom
                             reader["gst_amount"],         // GST
                             reader["net_amount"]          // Net
                         );
+                    }
+
+                    if (lblDetailsHint != null && !string.IsNullOrWhiteSpace(couponCode) && couponDisc > 0)
+                    {
+                        lblDetailsHint.Text =
+                            "Coupon " + couponCode + " -₹" + couponDisc.ToString("0.00") +
+                            "  ·  Payable ₹" + billed.ToString("N2");
                     }
                 }
             }
@@ -691,7 +756,7 @@ namespace BubbyPlanetShowroom
 
         private string GetDateCondition(string dateColumn)
         {
-            return "DATE(" + dateColumn + ") BETWEEN @fromDate AND @toDate";
+            return SellingCalculations.SqlDateTimeInFilter(dateColumn);
         }
 
         private void AddPeriodParams(MySqlCommand cmd)
@@ -704,8 +769,8 @@ namespace BubbyPlanetShowroom
                 out DateTime from,
                 out DateTime to);
 
-            cmd.Parameters.AddWithValue("@fromDate", from.ToString("yyyy-MM-dd"));
-            cmd.Parameters.AddWithValue("@toDate", to.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("@fromDate", from.Date);
+            cmd.Parameters.AddWithValue("@toDateExclusive", SellingCalculations.RangeEndExclusive(to));
         }
     }
 }

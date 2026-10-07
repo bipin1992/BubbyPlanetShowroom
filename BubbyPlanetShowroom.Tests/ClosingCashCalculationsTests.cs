@@ -15,19 +15,52 @@ namespace BubbyPlanetShowroom.Tests
                 "collect", "Cash", 200m, Today, Yesterday, "Cash");
 
             Assert.Equal(200m, extra);
+            Assert.True(ClosingCashCalculations.IncludeSettlementAsCashLine(extra));
             Assert.Equal(1200m, ClosingCashCalculations.CombineCashFromDb(1000m, extra));
         }
 
         [Fact]
-        public void T99ToT399_SameDayCashExtra_ClosingShowsOnlyExtra255()
+        public void SameDayCashExtra_KeepsRemainingBilled()
         {
             decimal extraInDrawer = ClosingCashCalculations.SettlementEffectOnDrawer(
                 "collect", "Cash", 255m, Today, Today, "Cash");
 
             Assert.Equal(0m, extraInDrawer);
-            Assert.True(ClosingCashCalculations.HideSaleLineWhenExtraCollected(255m));
-            Assert.Equal(255m, ClosingCashCalculations.CashBillContribution(339.15m, 255m));
-            Assert.Equal(339.15m, ClosingCashCalculations.CashBillContribution(339.15m, 0m));
+            Assert.False(ClosingCashCalculations.IncludeSettlementAsCashLine(extraInDrawer));
+            Assert.Equal(339.15m, ClosingCashCalculations.CashBillContribution(339.15m, 255m));
+            Assert.Equal(339.15m, ClosingCashCalculations.CombineCashFromDb(339.15m, extraInDrawer));
+        }
+
+        [Fact]
+        public void Order1326_Exchange_DrawerKeepsRemainingBilled()
+        {
+            decimal extraLine = ClosingCashCalculations.SettlementEffectOnDrawer(
+                "collect", "Cash", 153.90m, Today, Today, "Cash");
+
+            Assert.Equal(0m, extraLine);
+            Assert.False(ClosingCashCalculations.IncludeSettlementAsCashLine(extraLine));
+            Assert.Equal(506.70m, ClosingCashCalculations.CashBillContribution(506.70m, 153.90m));
+            Assert.Equal(506.70m, ClosingCashCalculations.CombineCashFromDb(506.70m, extraLine));
+        }
+
+        [Fact]
+        public void Order1327_MistakeReturn_DrawerStaysZero()
+        {
+            decimal refundLine = ClosingCashCalculations.SettlementEffectOnDrawer(
+                "refund", "Cash", 268.20m, Today, Today, "Cash");
+
+            Assert.Equal(0m, refundLine);
+            Assert.False(ClosingCashCalculations.IncludeSettlementAsCashLine(refundLine));
+            Assert.Equal(0m, ClosingCashCalculations.CashBillContribution(0m, -268.20m));
+            Assert.Equal(0m, ClosingCashCalculations.CombineCashFromDb(0m, refundLine));
+        }
+
+        [Fact]
+        public void CouponCashBill_DrawerUsesPayableNotItemNets()
+        {
+            decimal billed = CouponCalculations.BilledSale(49.50m, 40m);
+            Assert.Equal(9.50m, billed);
+            Assert.Equal(9.50m, ClosingCashCalculations.CashBillContribution(billed, 0m));
         }
 
         [Fact]
@@ -46,6 +79,7 @@ namespace BubbyPlanetShowroom.Tests
                 "refund", "Cash", 400m, Today, Yesterday, "Cash");
 
             Assert.Equal(-400m, refund);
+            Assert.True(ClosingCashCalculations.IncludeSettlementAsCashLine(refund));
             Assert.Equal(600m, ClosingCashCalculations.CombineCashFromDb(1000m, refund));
         }
 

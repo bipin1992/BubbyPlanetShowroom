@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Xunit;
 
 namespace BubbyPlanetShowroom.Tests
@@ -434,6 +435,195 @@ namespace BubbyPlanetShowroom.Tests
             Assert.Equal(original, refunded);
         }
 
+        [Fact]
+        public void CouponReturn_FullBill_RefundsPaidAmountNotItemNets()
+        {
+            // Items 2000, coupon 100, customer paid 1900.
+            decimal[] shares = ReturnCalculations.AllocateCouponShares(100m, 2000m, new[] { 2000m });
+            Assert.Equal(100.00m, shares[0]);
+            Assert.Equal(1900.00m, ReturnCalculations.RefundAfterCoupon(2000m, shares[0]));
+        }
+
+        [Fact]
+        public void CouponReturn_HalfBill_TakesHalfCoupon()
+        {
+            decimal[] shares = ReturnCalculations.AllocateCouponShares(100m, 2000m, new[] { 1000m });
+            Assert.Equal(50.00m, shares[0]);
+            Assert.Equal(950.00m, ReturnCalculations.RefundAfterCoupon(1000m, shares[0]));
+            Assert.Equal(50.00m, ReturnCalculations.RemainingCouponAfterReturn(100m, shares[0]));
+        }
+
+        [Fact]
+        public void CouponReturn_TwoVisits_TotalRefundEqualsAmountPaid()
+        {
+            decimal remainingCoupon = 100m;
+            decimal remainingItems = 2000m;
+
+            decimal[] first = ReturnCalculations.AllocateCouponShares(remainingCoupon, remainingItems, new[] { 1000m });
+            decimal refund1 = ReturnCalculations.RefundAfterCoupon(1000m, first[0]);
+            remainingCoupon = ReturnCalculations.RemainingCouponAfterReturn(remainingCoupon, first[0]);
+            remainingItems = 1000m;
+
+            decimal[] second = ReturnCalculations.AllocateCouponShares(remainingCoupon, remainingItems, new[] { 1000m });
+            decimal refund2 = ReturnCalculations.RefundAfterCoupon(1000m, second[0]);
+
+            Assert.Equal(950.00m, refund1);
+            Assert.Equal(950.00m, refund2);
+            Assert.Equal(1900.00m, refund1 + refund2);
+            Assert.Equal(0.00m, ReturnCalculations.RemainingCouponAfterReturn(remainingCoupon, second[0]));
+        }
+
+        [Fact]
+        public void CouponReturn_TwoLinesSameVisit_SharesSumToCoupon()
+        {
+            decimal[] shares = ReturnCalculations.AllocateCouponShares(100m, 2000m, new[] { 1200m, 800m });
+            Assert.Equal(100.00m, ReturnCalculations.Round2(shares[0] + shares[1]));
+            Assert.Equal(1900.00m,
+                ReturnCalculations.RefundAfterCoupon(1200m, shares[0]) +
+                ReturnCalculations.RefundAfterCoupon(800m, shares[1]));
+        }
+
+        [Fact]
+        public void CouponExchange_SameLineNet_NoExtra_CouponStaysOnBill()
+        {
+            decimal returnedNet = 439.12m;
+            decimal newNet = 439.12m;
+            var ex = ReturnCalculations.CalculateExchange(returnedNet, newNet);
+            Assert.Equal(0.00m, ex.BalanceDue);
+            Assert.True(ex.MeetsEqualOrMoreRule);
+
+            decimal remainingItems = 2195.60m - returnedNet + newNet;
+            Assert.Equal(2195.60m, remainingItems);
+            Assert.Equal(100.00m, ReturnCalculations.CouponOnRemainingBill(100m, remainingItems));
+        }
+
+        [Fact]
+        public void CouponExchange_DearerItem_PaysDifference_CouponStays()
+        {
+            var ex = ReturnCalculations.CalculateExchange(439.12m, 500m);
+            Assert.Equal(60.88m, ex.BalanceDue);
+
+            decimal remainingItems = 1756.48m + 500m;
+            Assert.Equal(100.00m, ReturnCalculations.CouponOnRemainingBill(100m, remainingItems));
+            Assert.Equal(2156.48m, remainingItems - 100m);
+        }
+
+        [Fact]
+        public void CouponOnRemainingBill_ClampsToRemainingNets()
+        {
+            Assert.Equal(50.00m, ReturnCalculations.CouponOnRemainingBill(100m, 50m));
+            Assert.Equal(0.00m, ReturnCalculations.CouponOnRemainingBill(100m, 0m));
+        }
+
+        [Fact]
+        public void MultiQty_FiveHoodies_ReturnTwoThenThree_RefundsExactlyAmountPaid()
+        {
+            ReturnCalculations.CalculateLineAmounts(499m, 0m, 12m, 5, out _, out _, out _, out decimal net);
+            Assert.Equal(2195.60m, net);
+
+            var bill = CouponBill.Open(100m, net);
+            Assert.Equal(2095.60m, bill.Paid);
+
+            decimal refund1 = bill.CashReturn(net / 5m * 2m); // 2 of 5
+            decimal refund2 = bill.CashReturn(bill.RemainingItems); // leftover 3
+
+            Assert.Equal(2095.60m, ReturnCalculations.Round2(refund1 + refund2));
+            Assert.Equal(0.00m, bill.RemainingItems);
+            Assert.Equal(0.00m, bill.Coupon);
+            bill.AssertBalanced();
+        }
+
+        [Fact]
+        public void MultiItem_ReturnTwoDifferentLinesSameVisit_CouponSplitsAndBalanceHolds()
+        {
+            var bill = CouponBill.Open(100m, 1200m, 800m, 400m);
+            Assert.Equal(2400.00m, bill.RemainingItems);
+            Assert.Equal(2300.00m, bill.Paid);
+
+            decimal refund = bill.CashReturn(1200m, 400m); // first + third lines
+            Assert.Equal(800.00m, bill.RemainingItems);
+            Assert.Equal(2300.00m, ReturnCalculations.Round2(refund + bill.RemainingPayable));
+            bill.AssertBalanced();
+
+            decimal rest = bill.CashReturn(bill.RemainingItems);
+            Assert.Equal(2300.00m, ReturnCalculations.Round2(refund + rest));
+            Assert.Equal(0.00m, bill.Coupon);
+            bill.AssertBalanced();
+        }
+
+        [Fact]
+        public void MultiQty_PartialThenPartial_EachPieceTakesProportionalCoupon()
+        {
+            // 3 balls @ 49.50, coupon 40, paid 108.50
+            ReturnCalculations.CalculateLineAmounts(55m, 0m, 10m, 3, out _, out _, out _, out decimal net);
+            Assert.Equal(148.50m, net);
+
+            var bill = CouponBill.Open(40m, net);
+            Assert.Equal(108.50m, bill.Paid);
+
+            decimal unit = ReturnCalculations.Round2(net / 3m);
+            decimal r1 = bill.CashReturn(unit);
+            decimal r2 = bill.CashReturn(unit);
+            decimal r3 = bill.CashReturn(bill.RemainingItems);
+
+            Assert.Equal(108.50m, ReturnCalculations.Round2(r1 + r2 + r3));
+            bill.AssertBalanced();
+        }
+
+        [Fact]
+        public void MultiItemMultiQty_ExchangeTwoOfFive_AddTwoNew_CollectExtra_CouponStays()
+        {
+            ReturnCalculations.CalculateLineAmounts(499m, 0m, 12m, 5, out _, out _, out _, out decimal hoodieNet);
+            decimal returnTwo = ReturnCalculations.Round2(hoodieNet / 5m * 2m);
+
+            var bill = CouponBill.Open(100m, hoodieNet); // 2195.60, paid 2095.60
+
+            var even = bill.Exchange(new[] { returnTwo }, returnTwo);
+            Assert.True(even.MeetsEqualOrMoreRule);
+            Assert.Equal(0.00m, even.BalanceDue);
+            Assert.Equal(100.00m, bill.Coupon);
+            Assert.Equal(hoodieNet, bill.RemainingItems);
+            bill.AssertBalanced();
+
+            var extraBill = CouponBill.Open(100m, hoodieNet);
+            decimal newItems = 1000m;
+            var extra = extraBill.Exchange(new[] { returnTwo }, newItems);
+            Assert.Equal(ReturnCalculations.Round2(newItems - returnTwo), extra.BalanceDue);
+            Assert.Equal(100.00m, extraBill.Coupon);
+            extraBill.AssertBalanced();
+        }
+
+        [Fact]
+        public void MultiLine_ExchangeOneLineKeepOthers_CouponStaysOnWholeBill()
+        {
+            var bill = CouponBill.Open(100m, 1000m, 600m, 400m);
+            decimal paid = bill.Paid; // 1900
+
+            var ex = bill.Exchange(new[] { 600m }, 600m); // even swap middle line
+            Assert.Equal(0.00m, ex.BalanceDue);
+            Assert.Equal(100.00m, bill.Coupon);
+            Assert.Equal(2000.00m, bill.RemainingItems);
+            Assert.Equal(paid, bill.RemainingPayable);
+            bill.AssertBalanced();
+        }
+
+        [Fact]
+        public void MultiQty_ReturnAllRemainingInLastVisit_TakesLeftoverCouponPaisa()
+        {
+            var bill = CouponBill.Open(100m, 333.33m, 333.33m, 333.34m);
+            Assert.Equal(1000.00m, bill.RemainingItems);
+            Assert.Equal(900.00m, bill.Paid);
+
+            decimal r1 = bill.CashReturn(333.33m);
+            decimal r2 = bill.CashReturn(333.33m);
+            decimal r3 = bill.CashReturn(bill.RemainingItems);
+
+            Assert.Equal(900.00m, ReturnCalculations.Round2(r1 + r2 + r3));
+            Assert.Equal(0.00m, bill.Coupon);
+            Assert.Equal(0.00m, bill.RemainingItems);
+            bill.AssertBalanced();
+        }
+
         [Theory]
         [InlineData(500, 500, 0, 0, true)]
         [InlineData(500, 600, 100, 0, true)]
@@ -555,6 +745,155 @@ namespace BubbyPlanetShowroom.Tests
 
             Assert.Equal(originalBill, ReturnCalculations.Round2(totalRefund + remaining));
             Assert.Equal(ReturnCalculations.Round2(orderGrand), ReturnCalculations.Round2(orderSubtotal + orderTax));
+        }
+
+        /// <summary>
+        /// Mirrors Return.cs coupon cash-return / exchange math for multi-line bills.
+        /// Invariant: originalPaid + collected = remainingPayable + cashRefunded.
+        /// </summary>
+        private sealed class CouponBill
+        {
+            private readonly List<decimal> _lineNets = new();
+
+            public decimal Coupon { get; private set; }
+            public decimal Paid { get; }
+            public decimal CashRefunded { get; private set; }
+            public decimal Collected { get; private set; }
+            public decimal RemainingItems
+            {
+                get
+                {
+                    decimal total = 0;
+                    foreach (decimal net in _lineNets)
+                        total += net;
+                    return ReturnCalculations.Round2(total);
+                }
+            }
+            public decimal RemainingPayable =>
+                CouponCalculations.PayableAfterCoupon(RemainingItems, Coupon);
+
+            public static CouponBill Open(decimal coupon, params decimal[] lineNets)
+            {
+                return new CouponBill(coupon, lineNets);
+            }
+
+            private CouponBill(decimal coupon, decimal[] lineNets)
+            {
+                foreach (decimal net in lineNets)
+                    _lineNets.Add(ReturnCalculations.Round2(net));
+                Coupon = ReturnCalculations.CouponOnRemainingBill(coupon, RemainingItems);
+                Paid = RemainingPayable;
+            }
+
+            public decimal CashReturn(params decimal[] returnedNets)
+            {
+                decimal remainingItemsBefore = RemainingItems;
+                decimal[] shares = ReturnCalculations.AllocateCouponShares(
+                    Coupon, remainingItemsBefore, returnedNets);
+                decimal couponReturned = 0;
+                decimal lineRefund = 0;
+                for (int i = 0; i < returnedNets.Length; i++)
+                {
+                    lineRefund += returnedNets[i];
+                    couponReturned += shares[i];
+                    SubtractReturnedNet(returnedNets[i]);
+                }
+                couponReturned = ReturnCalculations.Round2(couponReturned);
+                decimal cash = ReturnCalculations.RefundAfterCoupon(lineRefund, couponReturned);
+                Coupon = ReturnCalculations.RemainingCouponAfterReturn(Coupon, couponReturned);
+                Coupon = ReturnCalculations.CouponOnRemainingBill(Coupon, RemainingItems);
+                CashRefunded = ReturnCalculations.Round2(CashRefunded + cash);
+                return cash;
+            }
+
+            public ExchangeSummary Exchange(decimal[] returnedNets, decimal newItemsNet)
+            {
+                decimal returnValue = 0;
+                foreach (decimal net in returnedNets)
+                {
+                    returnValue += net;
+                    SubtractReturnedNet(net);
+                }
+                returnValue = ReturnCalculations.Round2(returnValue);
+                newItemsNet = ReturnCalculations.Round2(newItemsNet);
+                var ex = ReturnCalculations.CalculateExchange(returnValue, newItemsNet);
+                if (!ex.MeetsEqualOrMoreRule)
+                    throw new InvalidOperationException("Exchange blocked: new items < return value.");
+
+                _lineNets.Add(newItemsNet);
+                Coupon = ReturnCalculations.CouponOnRemainingBill(Coupon, RemainingItems);
+                Collected = ReturnCalculations.Round2(Collected + ex.BalanceDue);
+                return ex;
+            }
+
+            public void AssertBalanced()
+            {
+                Assert.Equal(
+                    ReturnCalculations.Round2(Paid + Collected),
+                    ReturnCalculations.Round2(RemainingPayable + CashRefunded));
+            }
+
+            private void SubtractReturnedNet(decimal returnedNet)
+            {
+                returnedNet = ReturnCalculations.Round2(returnedNet);
+                int exact = -1;
+                for (int i = 0; i < _lineNets.Count; i++)
+                {
+                    if (Math.Abs(_lineNets[i] - returnedNet) <= 0.009m && _lineNets[i] > 0)
+                    {
+                        exact = i;
+                        break;
+                    }
+                }
+                if (exact >= 0)
+                {
+                    _lineNets[exact] = 0;
+                    return;
+                }
+
+                for (int i = 0; i < _lineNets.Count; i++)
+                {
+                    if (_lineNets[i] + 0.009m >= returnedNet && _lineNets[i] > 0)
+                    {
+                        _lineNets[i] = ReturnCalculations.Round2(_lineNets[i] - returnedNet);
+                        if (_lineNets[i] < 0)
+                            _lineNets[i] = 0;
+                        return;
+                    }
+                }
+
+                throw new InvalidOperationException("Returned net not found on remaining lines.");
+            }
+        }
+
+        [Fact]
+        public void ReturnedPiecesValue_Partial_SplitsRemainingNet()
+        {
+            // 2 of 5 returned, ₹300 still on the 3 left → returned pieces are ₹200
+            decimal value = ReturnCalculations.ReturnedPiecesValue(100m, 0m, 0m, 5, 2, 300m);
+            Assert.Equal(200.00m, value);
+        }
+
+        [Fact]
+        public void ReturnedPiecesValue_FullReturn_RebuildsFromPriceAndDiscount()
+        {
+            // Line amounts are zero after a full return. 249 at 40% = 149.40
+            decimal value = ReturnCalculations.ReturnedPiecesValue(249m, 0m, 40m, 1, 1, 0m);
+            Assert.Equal(149.40m, value);
+        }
+
+        [Fact]
+        public void ExchangeTakenValue_UsesRemainingNetWhenNothingReturned()
+        {
+            decimal value = ReturnCalculations.ExchangeTakenValue(199m, 0m, 10m, 1, 0, 179.10m);
+            Assert.Equal(179.10m, value);
+        }
+
+        [Fact]
+        public void ExchangeTakenValue_RebuildsWhenTheExchangeItemWasFullyReturned()
+        {
+            decimal value = ReturnCalculations.ExchangeTakenValue(249m, 0m, 10m, 1, 1, 0m);
+            Assert.Equal(224.10m, value);
         }
     }
 }

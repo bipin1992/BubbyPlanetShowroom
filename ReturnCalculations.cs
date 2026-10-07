@@ -33,6 +33,63 @@ namespace BubbyPlanetShowroom
             return Round2(netAmount / remaining * returnQty);
         }
 
+        /// <summary>
+        /// Price of the pieces already returned. While some units remain,
+        /// the leftover net is split by quantity. A fully returned line
+        /// has its amounts zeroed, so the value is rebuilt from price and discount.
+        /// </summary>
+        public static decimal ReturnedPiecesValue(
+            decimal sellingPrice,
+            decimal gstPercent,
+            decimal discountPercent,
+            int qty,
+            int returnedQty,
+            decimal remainingNet)
+        {
+            if (returnedQty <= 0 || qty <= 0)
+                return 0;
+
+            if (returnedQty > qty)
+                returnedQty = qty;
+
+            int remaining = qty - returnedQty;
+            if (remaining > 0)
+                return Round2(remainingNet / remaining * returnedQty);
+
+            CalculateLineAmounts(
+                sellingPrice,
+                gstPercent,
+                discountPercent,
+                returnedQty,
+                out _,
+                out _,
+                out _,
+                out decimal net);
+            return net;
+        }
+
+        /// <summary>
+        /// Price of the item taken in exchange. Leftover net plus any
+        /// part of that same line that was returned later.
+        /// </summary>
+        public static decimal ExchangeTakenValue(
+            decimal sellingPrice,
+            decimal gstPercent,
+            decimal discountPercent,
+            int qty,
+            int returnedQty,
+            decimal remainingNet)
+        {
+            if (qty <= 0)
+                return 0;
+
+            decimal returnedPart = ReturnedPiecesValue(
+                sellingPrice, gstPercent, discountPercent, qty, returnedQty, remainingNet);
+            if (remainingNet < 0)
+                remainingNet = 0;
+            return Round2(remainingNet + returnedPart);
+        }
+
         public static bool CanReturn(int qty, int returnedAlready, int returnNow)
         {
             if (returnNow <= 0)
@@ -130,6 +187,86 @@ namespace BubbyPlanetShowroom
         /// Mall exchange rule: new items must be equal or higher than return value.
         /// Balance due is what customer pays (new - return). Cash refund is 0 on exchange.
         /// </summary>
+        public static decimal RefundAfterCoupon(decimal lineRefund, decimal couponShare)
+        {
+            decimal refund = Round2(lineRefund) - Round2(Math.Max(0, couponShare));
+            return refund < 0 ? 0 : refund;
+        }
+
+        /// <summary>
+        /// Splits remaining bill-level coupon across the line nets being
+        /// returned now. Full remaining-bill return takes the leftover coupon
+        /// so paisa does not stick on the order.
+        /// </summary>
+        public static decimal[] AllocateCouponShares(
+            decimal remainingCoupon,
+            decimal remainingItemsNet,
+            decimal[] returnedLineNets)
+        {
+            int count = returnedLineNets?.Length ?? 0;
+            decimal[] shares = new decimal[count];
+            if (count == 0 || remainingCoupon <= 0 || remainingItemsNet <= 0)
+                return shares;
+
+            decimal totalReturned = 0;
+            for (int i = 0; i < count; i++)
+                totalReturned += Math.Max(0, returnedLineNets[i]);
+            totalReturned = Round2(totalReturned);
+            if (totalReturned <= 0)
+                return shares;
+
+            bool returningAllRemaining = totalReturned >= remainingItemsNet - 0.009m;
+            decimal couponToAllocate = returningAllRemaining
+                ? remainingCoupon
+                : Round2(remainingCoupon * (totalReturned / remainingItemsNet));
+
+            if (couponToAllocate > remainingCoupon)
+                couponToAllocate = remainingCoupon;
+            if (couponToAllocate > totalReturned)
+                couponToAllocate = totalReturned;
+
+            decimal assigned = 0;
+            for (int i = 0; i < count; i++)
+            {
+                decimal lineNet = Math.Max(0, returnedLineNets[i]);
+                if (i == count - 1)
+                {
+                    decimal last = Round2(couponToAllocate - assigned);
+                    if (last < 0) last = 0;
+                    if (last > lineNet) last = lineNet;
+                    shares[i] = last;
+                    break;
+                }
+
+                decimal share = totalReturned <= 0
+                    ? 0
+                    : Round2(couponToAllocate * (lineNet / totalReturned));
+                if (share > lineNet)
+                    share = lineNet;
+                shares[i] = share;
+                assigned += share;
+            }
+
+            return shares;
+        }
+
+        public static decimal RemainingCouponAfterReturn(decimal remainingCoupon, decimal couponShareReturned)
+        {
+            decimal left = Round2(remainingCoupon) - Round2(Math.Max(0, couponShareReturned));
+            return left < 0 ? 0 : left;
+        }
+
+        /// <summary>
+        /// Exchange keeps the bill-level coupon on whatever is left
+        /// (remaining original items + new items). Never more than remaining nets.
+        /// </summary>
+        public static decimal CouponOnRemainingBill(decimal remainingCoupon, decimal remainingItemsNet)
+        {
+            remainingCoupon = Round2(Math.Max(0, remainingCoupon));
+            remainingItemsNet = Round2(Math.Max(0, remainingItemsNet));
+            return remainingCoupon > remainingItemsNet ? remainingItemsNet : remainingCoupon;
+        }
+
         public static ExchangeSummary CalculateExchange(decimal returnValue, decimal newItemsValue)
         {
             returnValue = Round2(Math.Max(0, returnValue));

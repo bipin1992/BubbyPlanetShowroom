@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 
 namespace BubbyPlanetShowroom
 {
@@ -90,6 +92,57 @@ namespace BubbyPlanetShowroom
         {
             DateTime day = billDate.Date;
             return day >= from.Date && day <= to.Date;
+        }
+
+        public static DateTime RangeEndExclusive(DateTime toInclusive)
+        {
+            return toInclusive.Date.AddDays(1);
+        }
+
+        /// <summary>
+        /// Includes every bill from the start of <paramref name="fromInclusive"/>
+        /// through the last moment of <paramref name="toInclusive"/>.
+        /// </summary>
+        public static bool BillDateTimeInFilter(DateTime billAt, DateTime fromInclusive, DateTime toInclusive)
+        {
+            DateTime start = fromInclusive.Date;
+            DateTime endExclusive = RangeEndExclusive(toInclusive);
+            return billAt >= start && billAt < endExclusive;
+        }
+
+        public static string SqlDateTimeInFilter(string dateColumn)
+        {
+            return dateColumn + " >= @fromDate AND " + dateColumn + " < @toDateExclusive";
+        }
+
+        /// <summary>
+        /// Item percents on the bill, never a blended average like 11.1%.
+        /// </summary>
+        public static string FormatDiscountPercentLabel(string? csvPercents)
+        {
+            var unique = new SortedSet<decimal>();
+            if (!string.IsNullOrWhiteSpace(csvPercents))
+            {
+                foreach (string part in csvPercents.Split(new[] { ',', '|', '/' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    string token = part.Trim().TrimEnd('%').Trim();
+                    if (decimal.TryParse(token, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal pct))
+                        unique.Add(Math.Round(Math.Max(0, pct), 1, MidpointRounding.AwayFromZero));
+                }
+            }
+
+            if (unique.Count == 0)
+                unique.Add(0);
+
+            var labels = new List<string>();
+            foreach (decimal pct in unique)
+            {
+                labels.Add(pct == decimal.Truncate(pct)
+                    ? pct.ToString("0", CultureInfo.InvariantCulture) + "%"
+                    : pct.ToString("0.0", CultureInfo.InvariantCulture) + "%");
+            }
+
+            return string.Join(" / ", labels);
         }
     }
 }

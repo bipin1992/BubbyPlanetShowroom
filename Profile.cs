@@ -567,13 +567,16 @@ namespace BubbyPlanetShowroom
             {
                 using MySqlConnection conn = DB.GetConnection();
                 conn.Open();
+                DB.EnsureOrderCouponColumns(conn);
 
                 using MySqlCommand cmd = new MySqlCommand(@"
                     SELECT
                         o.id,
                         o.date_added,
                         o.payment_method,
-                        o.grand_total,
+                        IFNULL(o.coupon_code,'') AS coupon_code,
+                        IFNULL(o.coupon_discount,0) AS coupon_discount,
+                        " + CouponCalculations.SqlOrderBilledSale + @" AS billed_sale,
                         o.created_by,
                         c.first_name,
                         c.sur_name,
@@ -597,7 +600,7 @@ namespace BubbyPlanetShowroom
                     if (string.IsNullOrWhiteSpace(customer))
                         customer = "Walk-in Customer";
 
-                    decimal amount = Convert.ToDecimal(reader["grand_total"]);
+                    decimal amount = Convert.ToDecimal(reader["billed_sale"]);
                     totalSale += amount;
                     orderCount++;
 

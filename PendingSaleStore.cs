@@ -59,6 +59,8 @@ namespace BubbyPlanetShowroom
         public decimal GrandTotal { get; set; }
         public decimal TotalTaxable { get; set; }
         public decimal TotalGst { get; set; }
+        public string CouponCode { get; set; } = "";
+        public decimal CouponDiscount { get; set; }
         public List<PendingSaleLine> Items { get; set; } = new();
     }
 

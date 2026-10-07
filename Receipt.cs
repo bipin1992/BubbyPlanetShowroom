@@ -32,6 +32,7 @@ public class HoldBill
 
     public string Surname { get; set; }
     public string MembershipName { get; set; }
+    public string CouponCode { get; set; }
 }
 
 public class HoldItem
@@ -104,6 +105,11 @@ namespace BubbyPlanetShowroom
         private string lastRewardMobile = "";
         private string lastRewardCheckMobile = "";
         private decimal lastRewardCheckGrandTotal = -1;
+        private int? qtyBeforeEdit;
+
+        private decimal itemsGrandTotal = 0;
+        private decimal appliedCouponDiscount = 0;
+        private string appliedCouponCode = "";
 
         private bool isLoadingHoldBill = false;
         private bool pendingResumeChecked = false;
@@ -115,6 +121,8 @@ namespace BubbyPlanetShowroom
         private string currentMembership = "";
         private TextBox txtPaidAmount;
         private TextBox txtBillAmount;
+        private TextBox txtCouponCode;
+        private Label lblCoupon;
         private Label lblReturnAmount;
         private sealed class DraftScan
         {
@@ -279,6 +287,7 @@ namespace BubbyPlanetShowroom
             bill.RewardApplied = rewardApplied;
             bill.RewardDiscountPercent = rewardDiscountPercent;
             bill.MembershipName = currentMembership;
+            bill.CouponCode = CouponCalculations.NormalizeCode(txtCouponCode?.Text);
 
             holdBills.Add(bill);
 
@@ -341,6 +350,8 @@ namespace BubbyPlanetShowroom
 
                 lastRewardMobile = bill.Mobile;
                 currentMembership = bill.MembershipName;
+                if (txtCouponCode != null)
+                    txtCouponCode.Text = bill.CouponCode ?? "";
 
                 foreach (var item in bill.Items)
                 {
@@ -381,6 +392,8 @@ namespace BubbyPlanetShowroom
                 else
                     ApplyRewardDiscount();
             }
+
+            ValidateEnteredCoupon(showMessage: false);
         }
 
         private void CalculateLineAmounts(
@@ -477,25 +490,25 @@ namespace BubbyPlanetShowroom
             barcodeActionPanel.ColumnStyles.Clear();
 
             barcodeActionPanel.ColumnStyles.Add(
-                new ColumnStyle(SizeType.Absolute, 280F));
+                new ColumnStyle(SizeType.Absolute, 210F));
 
             barcodeActionPanel.ColumnStyles.Add(
-                new ColumnStyle(SizeType.Absolute, 120F));
+                new ColumnStyle(SizeType.Absolute, 110F));
 
             barcodeActionPanel.ColumnStyles.Add(
-                new ColumnStyle(SizeType.Absolute, 130F));
+                new ColumnStyle(SizeType.Absolute, 110F));
 
             barcodeActionPanel.ColumnStyles.Add(
-                new ColumnStyle(SizeType.Absolute, 20F));
+                new ColumnStyle(SizeType.Absolute, 170F));
+
+            barcodeActionPanel.ColumnStyles.Add(
+                new ColumnStyle(SizeType.Absolute, 150F));
+
+            barcodeActionPanel.ColumnStyles.Add(
+                new ColumnStyle(SizeType.Absolute, 150F));
 
             barcodeActionPanel.ColumnStyles.Add(
                 new ColumnStyle(SizeType.Absolute, 160F));
-
-            barcodeActionPanel.ColumnStyles.Add(
-                new ColumnStyle(SizeType.Absolute, 160F));
-
-            barcodeActionPanel.ColumnStyles.Add(
-    new ColumnStyle(SizeType.Absolute, 180F));
 
             txtBarcode = new TextBox();
             txtBarcode.Font = new Font("Segoe UI", 12, FontStyle.Regular);
@@ -552,7 +565,7 @@ namespace BubbyPlanetShowroom
             dgvRight.Columns[8].Name = "Net";
             dgvRight.Columns[8].ReadOnly = true;
 
-            dgvRight.Columns[0].FillWeight = 50;
+            dgvRight.Columns[0].FillWeight = 42;
             dgvRight.Columns[1].FillWeight = 6;
             dgvRight.Columns[2].FillWeight = 6;
             dgvRight.Columns[3].FillWeight = 6;
@@ -593,6 +606,12 @@ namespace BubbyPlanetShowroom
             dgvRight.Columns["Manual_Discount"].Visible = false;
             dgvRight.Columns.Add("Reward_Discount", "Reward_Discount");
             dgvRight.Columns["Reward_Discount"].Visible = false;
+
+            dgvRight.Columns.Add("Coupon_Off", "Coupon");
+            dgvRight.Columns["Coupon_Off"].ReadOnly = true;
+            dgvRight.Columns["Coupon_Off"].FillWeight = 8;
+            dgvRight.Columns["Coupon_Off"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+            dgvRight.Columns["Coupon_Off"].HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleRight;
 
             btnReset = new Button();
             btnReset.Text = "Reset Bill";
@@ -685,6 +704,31 @@ namespace BubbyPlanetShowroom
             billPanel.Controls.Add(txtBillAmount, 0, 1);
 
 
+            TableLayoutPanel couponPanel = new TableLayoutPanel();
+            couponPanel.Dock = DockStyle.Fill;
+            couponPanel.RowCount = 2;
+            couponPanel.ColumnCount = 1;
+            couponPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 20));
+            couponPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+
+            lblCoupon = new Label();
+            lblCoupon.Text = "Coupon";
+            lblCoupon.Dock = DockStyle.Fill;
+            lblCoupon.Font = new Font("Segoe UI", 9, FontStyle.Bold);
+
+            txtCouponCode = new TextBox();
+            txtCouponCode.Dock = DockStyle.Fill;
+            txtCouponCode.Font = new Font("Segoe UI", 11);
+            txtCouponCode.CharacterCasing = CharacterCasing.Upper;
+            txtCouponCode.PlaceholderText = "Code";
+            txtCouponCode.Margin = new Padding(0, 0, 8, 0);
+            txtCouponCode.Leave += (_, _) => RefreshCouponHint();
+            txtCouponCode.KeyDown += TxtCouponCode_KeyDown;
+
+            couponPanel.Controls.Add(lblCoupon, 0, 0);
+            couponPanel.Controls.Add(txtCouponCode, 0, 1);
+
+
             // ===== Return Panel =====
             // ===== Return Panel =====
             Panel pnlReturn = new Panel();
@@ -722,9 +766,7 @@ namespace BubbyPlanetShowroom
             barcodeActionPanel.Controls.Add(txtBarcode, 0, 0);
             barcodeActionPanel.Controls.Add(btnReset, 1, 0);
             barcodeActionPanel.Controls.Add(btnPrint, 2, 0);
-
-            barcodeActionPanel.Controls.Add(new Panel(), 3, 0);
-
+            barcodeActionPanel.Controls.Add(couponPanel, 3, 0);
             barcodeActionPanel.Controls.Add(paidPanel, 4, 0);
             barcodeActionPanel.Controls.Add(billPanel, 5, 0);
             barcodeActionPanel.Controls.Add(pnlReturn, 6, 0);
@@ -1000,7 +1042,9 @@ namespace BubbyPlanetShowroom
 
             rightPanel.Controls.Add(lstHoldBills);
 
+            dgvRight.CellBeginEdit += DgvRight_CellBeginEdit;
             dgvRight.CellEndEdit += DgvRight_CellEndEdit;
+            dgvRight.UserDeletedRow += (_, _) => MaybeCheckRewardDiscount();
             dgvRight.CellFormatting += DgvRight_LastScanCellFormatting;
             dgvRight.RowsAdded += (s, e) => UpdateActionButtonsState();
             dgvRight.RowsRemoved += (s, e) =>
@@ -1023,6 +1067,8 @@ namespace BubbyPlanetShowroom
 
             btnReset.Margin = new Padding(0, 10, 8, 10);
             btnPrint.Margin = new Padding(0, 10, 8, 10);
+            if (txtCouponCode != null)
+                txtCouponCode.Margin = new Padding(0, 0, 8, 8);
         }
 
         private void CalculateReturnAmount()
@@ -1113,17 +1159,17 @@ namespace BubbyPlanetShowroom
                 return;
 
             string mobile = txtMobile.Text.Trim();
-            if (!IsValidMobile(mobile) || grandTotal <= 0)
+            if (!IsValidMobile(mobile) || itemsGrandTotal <= 0)
                 return;
 
             if (lastRewardCheckMobile == mobile &&
-                lastRewardCheckGrandTotal == grandTotal)
+                lastRewardCheckGrandTotal == itemsGrandTotal)
                 return;
 
             if (CheckRewardDiscount())
             {
                 lastRewardCheckMobile = mobile;
-                lastRewardCheckGrandTotal = grandTotal;
+                lastRewardCheckGrandTotal = itemsGrandTotal;
             }
         }
 
@@ -1189,8 +1235,8 @@ namespace BubbyPlanetShowroom
             if (rewardApplied)
                 return CalculateCurrentBillWithReward(0);
 
-            return grandTotal > 0
-                ? grandTotal
+            return itemsGrandTotal > 0
+                ? itemsGrandTotal
                 : CalculateCurrentBillWithReward(0);
         }
 
@@ -1578,6 +1624,13 @@ namespace BubbyPlanetShowroom
                     return;
                 }
 
+                if (TryConsumeBarcodeAsCoupon(barcode))
+                {
+                    txtBarcode.Clear();
+                    e.SuppressKeyPress = true;
+                    return;
+                }
+
                 // 🔥 VALIDATION FIRST
                 bool isValid = ValidateItemBeforeLoad(barcode, out string validationReason);
 
@@ -1958,6 +2011,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 }
 
                 RecalculateTotals();
+                MaybeCheckRewardDiscount();
             }
 
             return true;
@@ -2113,15 +2167,10 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
 
             totaltaxableamount = Round2(totaltaxableamount);
             totalgst = Round2(totalgst);
-            grandTotal = Round2(grandTotal);
-
-            lblGrandTotal.Text =
-                "Grand Total: " + grandTotal.ToString("0.00");
-
-            CalculateReturnAmount();
+            itemsGrandTotal = Round2(grandTotal);
 
             EnsureAppliedRewardStillEligible();
-            MaybeCheckRewardDiscount();
+            ApplyValidatedCouponToTotals(showMessage: false);
         }
 
 
@@ -2461,9 +2510,10 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             int itemCount = GetPrintableItemCount();
             // Base includes header/footer + return policy block.
             // Keep some extra room for customer details + discount breakdown per item.
-            int baseHeight = 515;
-            int perItemHeight = 95;
-            int dynamicHeight = baseHeight + (itemCount * perItemHeight);
+            int baseHeight = 610 + ReceiptCalculations.InstagramFooterHeight;
+            int perItemHeight = ReceiptCalculations.ShouldPrintSaleCoupon(appliedCouponCode) ? 110 : 95;
+            int extraCouponLines = ReceiptCalculations.ShouldPrintSaleCoupon(appliedCouponCode) ? 50 : 0;
+            int dynamicHeight = baseHeight + extraCouponLines + (itemCount * perItemHeight);
 
             PaperSize customSize = new PaperSize("Custom", 300, dynamicHeight);
             printDocument.DefaultPageSettings.PaperSize = customSize;
@@ -2602,6 +2652,14 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                     g.DrawString($"Net: {totalVal:0.00}",boldFont,Brushes.Black,6,y);
                     y += 15;
 
+                    if (dgvRight.Rows[i].Cells["Coupon_Off"] != null &&
+                        decimal.TryParse(dgvRight.Rows[i].Cells["Coupon_Off"].Value?.ToString(), out decimal couponOff) &&
+                        couponOff > 0m)
+                    {
+                        g.DrawString($"Coupon off: -{couponOff:0.00}", boldFont, Brushes.Black, 6, y);
+                        y += 13;
+                    }
+
                     g.DrawString("--------------------------------",normalFont,Brushes.Black,5,y);
                     y += 15;
 
@@ -2616,8 +2674,22 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             g.DrawString(new string('-', 48), normalFont, Brushes.Black, 5, y);
             y += 15;
 
-            g.DrawString("GRAND TOTAL: " + grandTotal.ToString("0.00"), totalFont, Brushes.Black, 5, y);
+            g.DrawString("GRAND TOTAL: " + itemsGrandTotal.ToString("0.00"), totalFont, Brushes.Black, 5, y);
             y += 22;
+
+            string[] couponLines = ReceiptCalculations.CouponBillLines(
+                appliedCouponCode,
+                appliedCouponDiscount,
+                grandTotal);
+            if (couponLines.Length > 0)
+            {
+                g.DrawString(couponLines[0], boldFont, Brushes.Black, 5, y);
+                y += 15;
+                g.DrawString(couponLines[1], boldFont, Brushes.Black, 5, y);
+                y += 18;
+                g.DrawString(couponLines[2], totalFont, Brushes.Black, 5, y);
+                y += 22;
+            }
 
             g.DrawString("Taxable: " + totaltaxableamount.ToString("0.00"), normalFont, Brushes.Black, 5, y);
             y += 15;
@@ -2665,6 +2737,26 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             g.DrawString("10. A sale item can be returned only against", policyFont, Brushes.Black, 5, y);
             y += 10;
             g.DrawString("    items from that same sale.", policyFont, Brushes.Black, 5, y);
+            y += 11;
+            g.DrawString("11. If a sale item is returned, you can buy", policyFont, Brushes.Black, 5, y);
+            y += 10;
+            g.DrawString("    only a sale item.", policyFont, Brushes.Black, 5, y);
+            y += 11;
+            g.DrawString("12. Reward applies only with a 10-digit mobile.", policyFont, Brushes.Black, 5, y);
+            y += 10;
+            g.DrawString("    The percent is purchases after the last reward", policyFont, Brushes.Black, 5, y);
+            y += 10;
+            g.DrawString("    plus this bill, added on every item.", policyFont, Brushes.Black, 5, y);
+            y += 10;
+            g.DrawString("    Manual sale items do not get reward.", policyFont, Brushes.Black, 5, y);
+            y += 11;
+            g.DrawString("13. The coupon amount splits equally on each item,", policyFont, Brushes.Black, 5, y);
+            y += 10;
+            g.DrawString("    then by quantity. On return or exchange, the", policyFont, Brushes.Black, 5, y);
+            y += 10;
+            g.DrawString("    same coupon splits again on items kept and", policyFont, Brushes.Black, 5, y);
+            y += 10;
+            g.DrawString("    new items. A code with no amount still prints.", policyFont, Brushes.Black, 5, y);
             y += 16;
 
             // ===== BARCODE =====
@@ -2710,6 +2802,8 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             string thankYou = "Thank you for shopping with us";
             SizeF thankSize = g.MeasureString(thankYou, normalFont);
             g.DrawString(thankYou, normalFont, Brushes.Black, (pageWidth - thankSize.Width) / 2, y);
+            y += thankSize.Height + 4;
+            ReceiptCalculations.DrawInstagramFollow(g, pageWidth, y, normalFont);
 
             e.HasMorePages = false;
         }
@@ -2861,7 +2955,9 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 CurrentCustomerIsStaff = currentCustomerIsStaff,
                 GrandTotal = grandTotal,
                 TotalTaxable = totaltaxableamount,
-                TotalGst = totalgst
+                TotalGst = totalgst,
+                CouponCode = appliedCouponCode ?? "",
+                CouponDiscount = appliedCouponDiscount
             };
 
             foreach (DataGridViewRow row in dgvRight.Rows)
@@ -2925,6 +3021,8 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 grandTotal = pending.GrandTotal;
                 totaltaxableamount = pending.TotalTaxable;
                 totalgst = pending.TotalGst;
+                if (txtCouponCode != null)
+                    txtCouponCode.Text = pending.CouponCode ?? "";
 
                 foreach (PendingSaleLine item in pending.Items)
                 {
@@ -2958,6 +3056,8 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             {
                 isLoadingHoldBill = false;
             }
+
+            RecalculateTotals();
         }
 
         private bool OrderExistsInDb(int orderId)
@@ -3278,7 +3378,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
 
             subtotal = Round2(subtotal);
             tax = Round2(tax);
-            totalDiscount = Round2(totalDiscount);
+            totalDiscount = Round2(totalDiscount + appliedCouponDiscount);
 
             using MySqlCommand cmd = new MySqlCommand(@"
         INSERT INTO inv_orders
@@ -3289,6 +3389,9 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             total_tax,
             grand_total,
             payment_method,
+            coupon_code,
+            coupon_discount,
+            coupon_allocated,
             created_by,
             date_added
         )
@@ -3300,6 +3403,9 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             @tax,
             @grand,
             @pmethod,
+            @couponCode,
+            @couponDiscount,
+            @couponAllocated,
             @createdBy,
             NOW()
         );
@@ -3325,6 +3431,18 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             cmd.Parameters.AddWithValue(
                 "@pmethod",
                 (cmbPaymentMethod?.Text ?? "Cash").Trim());
+
+            cmd.Parameters.AddWithValue(
+                "@couponCode",
+                string.IsNullOrWhiteSpace(appliedCouponCode) ? DBNull.Value : appliedCouponCode);
+
+            cmd.Parameters.AddWithValue(
+                "@couponDiscount",
+                appliedCouponDiscount);
+
+            cmd.Parameters.AddWithValue(
+                "@couponAllocated",
+                appliedCouponDiscount > 0 ? 1 : 0);
 
             cmd.Parameters.AddWithValue(
                 "@createdBy",
@@ -3353,6 +3471,9 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
     MySqlTransaction transaction,
     int orderId)
         {
+            decimal[] couponShares = BuildSaleCouponShares();
+            int shareIndex = 0;
+
             foreach (DataGridViewRow row in dgvRight.Rows)
             {
                 if (row.IsNewRow || row.Cells[0].Value == null)
@@ -3420,6 +3541,24 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 decimal discountAmount =
                     Round2(gross - (taxable + gst));
 
+                decimal couponShare = shareIndex < couponShares.Length
+                    ? couponShares[shareIndex]
+                    : 0m;
+                shareIndex++;
+
+                CouponCalculations.CouponAdjustedLine adjusted =
+                    CouponCalculations.AddCouponToLine(
+                        discountAmount,
+                        taxable,
+                        gst,
+                        net,
+                        couponShare);
+                discountAmount = adjusted.DiscountAmount;
+                taxable = adjusted.TaxableAmount;
+                gst = adjusted.GstAmount;
+                net = adjusted.NetAmount;
+                couponShare = adjusted.CouponShare;
+
                 using MySqlCommand cmd = new MySqlCommand(@"
             INSERT INTO inv_order_details
             (
@@ -3432,7 +3571,8 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 discount_amount,
                 taxable_amount,
                 gst_amount,
-                net_amount
+                net_amount,
+                coupon_share
             )
             VALUES
             (
@@ -3445,7 +3585,8 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 @discountAmount,
                 @taxable,
                 @gst,
-                @net
+                @net,
+                @couponShare
             )",
                     conn,
                     transaction);
@@ -3474,6 +3615,10 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                     "@net",
                     net);
 
+                cmd.Parameters.AddWithValue(
+                    "@couponShare",
+                    couponShare);
+
                 cmd.ExecuteNonQuery();
 
                 UpdateStock(
@@ -3482,6 +3627,52 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                     itemCode,
                     qty);
             }
+
+            if (appliedCouponDiscount <= 0)
+                return;
+
+            using MySqlCommand sync = new MySqlCommand(@"
+                UPDATE inv_orders
+                SET
+                    subtotal = (
+                        SELECT IFNULL(SUM(taxable_amount),0)
+                        FROM inv_order_details
+                        WHERE order_id = @id),
+                    total_tax = (
+                        SELECT IFNULL(SUM(gst_amount),0)
+                        FROM inv_order_details
+                        WHERE order_id = @id),
+                    total_discount = (
+                        SELECT IFNULL(SUM(discount_amount),0)
+                        FROM inv_order_details
+                        WHERE order_id = @id)
+                WHERE id = @id", conn, transaction);
+            sync.Parameters.AddWithValue("@id", orderId);
+            sync.ExecuteNonQuery();
+        }
+
+        private decimal[] BuildSaleCouponShares()
+        {
+            var quantities = new List<int>();
+            var nets = new List<decimal>();
+            foreach (DataGridViewRow row in dgvRight.Rows)
+            {
+                if (row.IsNewRow || row.Cells[0].Value == null)
+                    continue;
+
+                int.TryParse(row.Cells[4].Value?.ToString(), out int qty);
+                decimal.TryParse(row.Cells[8].Value?.ToString(), out decimal net);
+                quantities.Add(qty);
+                nets.Add(net);
+            }
+
+            if (appliedCouponDiscount <= 0 || quantities.Count == 0)
+                return new decimal[quantities.Count];
+
+            return CouponCalculations.AllocateEvenByItem(
+                appliedCouponDiscount,
+                quantities.ToArray(),
+                nets.ToArray());
         }
 
         private void UpdateStock(MySqlConnection conn, MySqlTransaction transaction, string itemCode, int qty)
@@ -3501,6 +3692,24 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 throw new Exception($"Stock update failed for item {itemCode}. Please recheck available quantity.");
         }
 
+        private void CheckRewardIfQuantityChanged(int newQty)
+        {
+            if (qtyBeforeEdit == newQty)
+                return;
+
+            MaybeCheckRewardDiscount();
+        }
+
+        private void DgvRight_CellBeginEdit(object sender, DataGridViewCellCancelEventArgs e)
+        {
+            qtyBeforeEdit = null;
+            if (e.ColumnIndex != 4 || e.RowIndex < 0 || e.RowIndex >= dgvRight.Rows.Count)
+                return;
+
+            if (int.TryParse(dgvRight.Rows[e.RowIndex].Cells[4].Value?.ToString(), out int qty))
+                qtyBeforeEdit = qty;
+        }
+
         private void DgvRight_CellEndEdit(object sender, DataGridViewCellEventArgs e)
         {
             if (e.ColumnIndex == 4 || e.ColumnIndex == 1)
@@ -3516,6 +3725,8 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 {
                     row.Cells[4].Value = 1;
                     RecalculateRowAmounts();
+                    if (e.ColumnIndex == 4)
+                        CheckRewardIfQuantityChanged(1);
                     return;
                 }
 
@@ -3526,6 +3737,8 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                     MessageBox.Show("Invalid Quantity");
                     row.Cells[4].Value = 1;
                     RecalculateRowAmounts();
+                    if (e.ColumnIndex == 4)
+                        CheckRewardIfQuantityChanged(1);
                     return;
                 }
 
@@ -3533,6 +3746,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 {
                     dgvRight.Rows.RemoveAt(e.RowIndex);
                     RecalculateTotals();
+                    MaybeCheckRewardDiscount();
                     return;
                 }
 
@@ -3561,6 +3775,8 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                         MessageBox.Show("Stock not found ❌");
                         row.Cells[4].Value = 1;
                         RecalculateRowAmounts();
+                        if (e.ColumnIndex == 4)
+                            CheckRewardIfQuantityChanged(1);
                         return;
                     }
 
@@ -3578,6 +3794,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                         {
                             dgvRight.Rows.RemoveAt(e.RowIndex);
                             RecalculateTotals();
+                            MaybeCheckRewardDiscount();
                             return;
                         }
 
@@ -3624,6 +3841,8 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
 
                 ApplyLineAmountsToRow(row, price, gstPercent, discount, qty);
                 RecalculateTotals();
+                if (e.ColumnIndex == 4)
+                    CheckRewardIfQuantityChanged(qty);
             }
         }
 
@@ -3689,6 +3908,14 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             lastRewardMobile = "";
             lastRewardCheckMobile = "";
             lastRewardCheckGrandTotal = -1;
+            itemsGrandTotal = 0;
+            appliedCouponDiscount = 0;
+            appliedCouponCode = "";
+
+            if (txtCouponCode != null)
+                txtCouponCode.Clear();
+            if (lblCoupon != null)
+                lblCoupon.Text = "Coupon";
 
             txtBarcode.Focus();
         }
@@ -3720,6 +3947,14 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             lastRewardCheckMobile = "";
             lastRewardCheckGrandTotal = -1;
             currentMembership = "";
+            itemsGrandTotal = 0;
+            appliedCouponDiscount = 0;
+            appliedCouponCode = "";
+
+            if (txtCouponCode != null)
+                txtCouponCode.Clear();
+            if (lblCoupon != null)
+                lblCoupon.Text = "Coupon";
 
             txtBarcode.Focus();
         }
@@ -3856,12 +4091,213 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 }
             }
 
+            if (!ValidateEnteredCoupon(showMessage: true))
+                return false;
+
+            return true;
+        }
+
+        private void TxtCouponCode_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+                return;
+
+            e.SuppressKeyPress = true;
+            ValidateEnteredCoupon(showMessage: true);
+        }
+
+        private void RefreshCouponHint()
+        {
+            ValidateEnteredCoupon(showMessage: false);
+        }
+
+        private bool TryConsumeBarcodeAsCoupon(string barcode)
+        {
+            string code = CouponCalculations.NormalizeCode(barcode);
+            if (string.IsNullOrWhiteSpace(code))
+                return false;
+
+            if (!TryLoadCouponRecord(code, out _, out _, out _, out _, out _, out bool found) || !found)
+                return false;
+
+            if (txtCouponCode != null)
+                txtCouponCode.Text = code;
+
+            ValidateEnteredCoupon(showMessage: true);
+            return true;
+        }
+
+        private bool ValidateEnteredCoupon(bool showMessage)
+        {
+            return ApplyValidatedCouponToTotals(showMessage);
+        }
+
+        private bool ApplyValidatedCouponToTotals(bool showMessage)
+        {
+            string code = CouponCalculations.NormalizeCode(txtCouponCode?.Text);
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                ClearAppliedCouponState();
+                if (lblCoupon != null)
+                    lblCoupon.Text = "Coupon";
+                UpdatePayableTotal();
+                return true;
+            }
+
+            try
+            {
+                if (!TryLoadCouponRecord(
+                    code,
+                    out decimal minAmount,
+                    out decimal discountAmount,
+                    out DateTime from,
+                    out DateTime to,
+                    out bool active,
+                    out bool found))
+                {
+                    ClearAppliedCouponState();
+                    UpdatePayableTotal();
+                    if (showMessage)
+                        MessageBox.Show("Failed to check coupon.");
+                    return !showMessage;
+                }
+
+                CouponCheckResult result = CouponCalculations.Evaluate(
+                    code,
+                    found,
+                    DateTime.Today,
+                    from,
+                    to,
+                    active,
+                    minAmount,
+                    discountAmount,
+                    itemsGrandTotal);
+
+                if (!result.Applied)
+                {
+                    ClearAppliedCouponState();
+                    if (lblCoupon != null)
+                    {
+                        if (!string.IsNullOrWhiteSpace(result.Status) && result.Status != "Valid")
+                            lblCoupon.Text = result.Status;
+                        else if (result.MinPurchaseAmount > 0)
+                            lblCoupon.Text = $"Min {result.MinPurchaseAmount:0.##}";
+                        else
+                            lblCoupon.Text = "Coupon";
+                    }
+
+                    UpdatePayableTotal();
+                    if (showMessage && !string.IsNullOrWhiteSpace(result.Message))
+                    {
+                        MessageBox.Show(result.Message);
+                        txtCouponCode?.Focus();
+                    }
+                    return false;
+                }
+
+                appliedCouponCode = result.Code;
+                appliedCouponDiscount = result.AppliedDiscount;
+                if (lblCoupon != null)
+                {
+                    lblCoupon.Text = appliedCouponDiscount > 0
+                        ? $"₹{appliedCouponDiscount:0.##} off"
+                        : result.Code;
+                }
+
+                UpdatePayableTotal();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ClearAppliedCouponState();
+                UpdatePayableTotal();
+                if (showMessage)
+                    MessageBox.Show("Failed to check coupon.\n" + ex.Message);
+                return !showMessage;
+            }
+        }
+
+        private void ClearAppliedCouponState()
+        {
+            appliedCouponCode = "";
+            appliedCouponDiscount = 0;
+        }
+
+        private void UpdatePayableTotal()
+        {
+            grandTotal = CouponCalculations.PayableAfterCoupon(itemsGrandTotal, appliedCouponDiscount);
+            if (lblGrandTotal != null)
+                lblGrandTotal.Text = "Grand Total: " + grandTotal.ToString("0.00");
+            ShowCouponOffOnEachItem();
+            CalculateReturnAmount();
+        }
+
+        private void ShowCouponOffOnEachItem()
+        {
+            if (dgvRight == null || !dgvRight.Columns.Contains("Coupon_Off"))
+                return;
+
+            decimal[] shares = BuildSaleCouponShares();
+            int index = 0;
+            foreach (DataGridViewRow row in dgvRight.Rows)
+            {
+                if (row.IsNewRow || row.Cells[0].Value == null)
+                    continue;
+
+                decimal share = index < shares.Length ? shares[index] : 0m;
+                index++;
+                row.Cells["Coupon_Off"].Value = share.ToString("0.00");
+            }
+        }
+
+        private bool TryLoadCouponRecord(
+            string code,
+            out decimal minAmount,
+            out decimal discountAmount,
+            out DateTime validFrom,
+            out DateTime validTo,
+            out bool isActive,
+            out bool found)
+        {
+            minAmount = 0;
+            discountAmount = 0;
+            validFrom = DateTime.MinValue;
+            validTo = DateTime.MinValue;
+            isActive = false;
+            found = false;
+
+            using var conn = DB.GetConnection();
+            conn.Open();
+            DB.EnsureCouponSchema(conn);
+
+            using var cmd = new MySqlCommand(@"
+SELECT min_purchase_amount,
+       discount_amount,
+       DATE_FORMAT(valid_from, '%Y-%m-%d') AS valid_from,
+       DATE_FORMAT(valid_to, '%Y-%m-%d') AS valid_to,
+       is_active
+FROM inv_coupons
+WHERE coupon_code=@code
+LIMIT 1", conn);
+            cmd.Parameters.AddWithValue("@code", code);
+
+            using var reader = cmd.ExecuteReader();
+            if (!reader.Read())
+                return true;
+
+            minAmount = CouponCalculations.ToAmount(reader["min_purchase_amount"]);
+            discountAmount = CouponCalculations.ToAmount(reader["discount_amount"]);
+            validFrom = CouponCalculations.ToDate(reader["valid_from"]);
+            validTo = CouponCalculations.ToDate(reader["valid_to"]);
+            isActive = CouponCalculations.ToBool(reader["is_active"]);
+            found = true;
             return true;
         }
 
         private void EnsureOrderPaymentColumns(MySqlConnection conn)
         {
             EnsureColumnExists(conn, "inv_orders", "payment_method", "VARCHAR(40) NOT NULL DEFAULT 'Cash'");
+            DB.EnsureOrderCouponColumns(conn);
         }
 
         private void EnsureColumnExists(MySqlConnection conn, string tableName, string columnName, string definition)

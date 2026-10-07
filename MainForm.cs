@@ -40,7 +40,7 @@ namespace BubbyPlanetShowroom
 
         public MainForm()
         {
-            this.Text = "Bubbyplanet Showroom Management";
+            this.Text = "Bubbyplanet Showroom Management  ·  " + AppVersion.Display;
             this.WindowState = FormWindowState.Maximized;
             AppIcon.Apply(this);
 
@@ -224,6 +224,41 @@ namespace BubbyPlanetShowroom
                 new Rectangle(18, 40, 360, 18),
                 Color.FromArgb(204, 251, 241),
                 TextFormatFlags.Left | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+
+            DrawHeaderVersion(e.Graphics);
+        }
+
+        private void DrawHeaderVersion(Graphics g)
+        {
+            string version = AppVersion.Display;
+            using Font versionFont = new Font("Segoe UI", 9.5f, FontStyle.Bold, GraphicsUnit.Point);
+            Size textSize = TextRenderer.MeasureText(
+                g, version, versionFont, Size.Empty,
+                TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+
+            int pillW = textSize.Width + 22;
+            int pillH = 28;
+            int leftSafe = 360;
+            int rightSafe = header.Width - 330;
+            if (rightSafe - leftSafe < pillW)
+                return;
+
+            int pillX = leftSafe + (rightSafe - leftSafe - pillW) / 2;
+            int pillY = Math.Max(8, (header.Height - 4 - pillH) / 2);
+            Rectangle pill = new Rectangle(pillX, pillY, pillW, pillH);
+
+            using (SolidBrush fill = new SolidBrush(Color.FromArgb(55, 255, 255, 255)))
+            using (Pen border = new Pen(Color.FromArgb(100, 255, 255, 255)))
+            {
+                g.FillRectangle(fill, pill);
+                g.DrawRectangle(border, pill.X, pill.Y, pill.Width - 1, pill.Height - 1);
+            }
+
+            TextRenderer.DrawText(
+                g, version, versionFont,
+                new Rectangle(pill.X + 11, pill.Y, pill.Width - 11, pill.Height),
+                Color.White,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
         }
 
         private static void StyleHeaderButton(Button btn, string text, Color back, int width)
@@ -298,6 +333,7 @@ namespace BubbyPlanetShowroom
             AddMenuButton("Label");
             AddMenuButton("Receipt");
             AddMenuButton("Return");
+            AddMenuButton("Return Bills");
             AddMenuButton("Profile");
             AddMenuButton("Users");
             AddMenuButton("Revenue");
@@ -367,6 +403,7 @@ namespace BubbyPlanetShowroom
                         "Label" => new LabelPrint(),
                         "Receipt" => receiptPage ??= new Receipt(),
                         "Return" => returnPage ??= new Return(),
+                        "Return Bills" => new ReturnBills(CurrentRole),
                         "Profile" => new Profile(),
                         "Users" => new Users(),
                         "Revenue" => new Revenue(),
@@ -494,6 +531,7 @@ namespace BubbyPlanetShowroom
             "Label" => Color.FromArgb(196, 181, 253),
             "Receipt" => Color.FromArgb(110, 231, 183),
             "Return" => Color.FromArgb(252, 165, 165),
+            "Return Bills" => Color.FromArgb(251, 146, 60),
             "Profile" => Color.FromArgb(165, 243, 252),
             "Users" => Color.FromArgb(186, 230, 253),
             "Revenue" => Color.FromArgb(190, 242, 100),
@@ -570,6 +608,15 @@ namespace BubbyPlanetShowroom
                     g.DrawArc(pen, cx - s, cy - s + 1, s * 2, s * 2 - 2, 200, 220);
                     g.DrawLine(pen, cx - s + 1, cy - 2, cx - s + 1, cy - s);
                     g.DrawLine(pen, cx - s + 1, cy - s, cx - 2, cy - s + 3);
+                    break;
+
+                case "Return Bills": // list with a return mark
+                    g.DrawLine(pen, cx - s, cy - 5, cx + 2, cy - 5);
+                    g.DrawLine(pen, cx - s, cy, cx + 2, cy);
+                    g.DrawLine(pen, cx - s, cy + 5, cx + 2, cy + 5);
+                    g.DrawLine(pen, cx + 4, cy + 4, cx + s, cy + 4);
+                    g.DrawLine(pen, cx + s - 3, cy + 1, cx + s, cy + 4);
+                    g.DrawLine(pen, cx + s - 3, cy + 7, cx + s, cy + 4);
                     break;
 
                 case "Profile": // person
@@ -777,7 +824,7 @@ namespace BubbyPlanetShowroom
                 else if (role == "Master Admin")
                     show = true;
                 else if (role == "Admin")
-                    show = key is "Add Item" or "Master" or "IN" or "Stock" or "Label" or "Receipt" or "Return" or "Closing Balance";
+                    show = key is "Add Item" or "Master" or "IN" or "Stock" or "Label" or "Receipt" or "Return" or "Return Bills" or "Closing Balance";
                 else if (role == "Cashier")
                     show = key is "Receipt" or "Return" or "IN" or "Stock" or "Label" or "Closing Balance";
 

@@ -10,6 +10,12 @@ namespace BubbyPlanetShowroom
         internal const string LabelPrinterName = "BubbyPlanet";
         internal const string ReceiptReturnPrinterName = "Receipt_BubbyPlanet";
 
+        // true  = receipt/return bill Microsoft Print to PDF me Save As dialog se dikhega
+        // false = shop thermal printer (Receipt_BubbyPlanet)
+        internal const bool PrintReceiptToMicrosoftPdf = false;
+
+        private const string MicrosoftPdfPrinterName = "Microsoft Print to PDF";
+
         internal static void ApplyLabelPrinter(PrintDocument doc)
         {
             ApplyPrinter(doc, LabelPrinterName);
@@ -17,7 +23,10 @@ namespace BubbyPlanetShowroom
 
         internal static void ApplyReceiptReturnPrinter(PrintDocument doc)
         {
-            ApplyPrinter(doc, ReceiptReturnPrinterName);
+            if (PrintReceiptToMicrosoftPdf)
+                ApplyPrinter(doc, MicrosoftPdfPrinterName);
+            else
+                ApplyPrinter(doc, ReceiptReturnPrinterName);
         }
 
         private static void ApplyPrinter(PrintDocument doc, string configuredName)

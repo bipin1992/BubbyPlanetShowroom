@@ -37,6 +37,7 @@ namespace BubbyPlanetShowroom
         {
             var lines = new List<ClosingCashBillLine>();
             DB.EnsureColumnExists(conn, "inv_orders", "payment_method", "VARCHAR(40) NOT NULL DEFAULT 'Cash'");
+            DB.EnsureOrderCouponColumns(conn);
             DB.EnsureReturnSettlementSchema(conn);
 
             DateTime fromDate = date.Date;
@@ -57,7 +58,6 @@ WHERE s.created_at >= @fromDate AND s.created_at < @toDate
 ORDER BY s.created_at ASC, s.id ASC;";
 
             var extraLines = new List<ClosingCashBillLine>();
-            var alreadyCountedByOrder = new Dictionary<int, decimal>();
 
             using (MySqlCommand cmd = new MySqlCommand(extraQuery, conn))
             {
@@ -75,54 +75,37 @@ ORDER BY s.created_at ASC, s.id ASC;";
                     string settlementMethod = reader["payment_method"]?.ToString() ?? "";
                     string orderMethod = reader["order_payment_method"]?.ToString() ?? "";
 
-                    decimal signed = ClosingCashCalculations.SignedCashAmount(
-                        settlementType, settlementMethod, amount);
                     decimal cashEffect = ClosingCashCalculations.SettlementEffectOnDrawer(
                         settlementType, settlementMethod, amount, fromDate, originalBillDate, orderMethod);
 
+                    if (!ClosingCashCalculations.IncludeSettlementAsCashLine(cashEffect))
+                        continue;
+
                     int orderId = Convert.ToInt32(reader["order_id"]);
-                    bool alreadyInTodayCash = ClosingCashCalculations.ExtraAlreadyInTodayCashBills(
-                        fromDate, originalBillDate, orderMethod);
-
-                    if (alreadyInTodayCash && signed != 0)
+                    bool online = !ClosingCashCalculations.IsCash(settlementMethod);
+                    extraLines.Add(new ClosingCashBillLine
                     {
-                        extraLines.Add(new ClosingCashBillLine
-                        {
-                            OrderId = orderId,
-                            Kind = signed > 0 ? "Return extra" : "Return refund",
-                            At = Convert.ToDateTime(reader["created_at"]),
-                            Amount = signed
-                        });
-
-                        if (alreadyCountedByOrder.ContainsKey(orderId))
-                            alreadyCountedByOrder[orderId] += signed;
-                        else
-                            alreadyCountedByOrder[orderId] = signed;
-                    }
-                    else if (cashEffect != 0)
-                    {
-                        bool online = !ClosingCashCalculations.IsCash(settlementMethod);
-                        extraLines.Add(new ClosingCashBillLine
-                        {
-                            OrderId = orderId,
-                            Kind = online
-                                ? (cashEffect < 0
-                                    ? ClosingCashCalculations.OnlineExtraKind
-                                    : ClosingCashCalculations.OnlineRefundKind)
-                                : (cashEffect > 0 ? "Return extra" : "Return refund"),
-                            At = Convert.ToDateTime(reader["created_at"]),
-                            Amount = cashEffect
-                        });
-                    }
+                        OrderId = orderId,
+                        Kind = online
+                            ? (cashEffect < 0
+                                ? ClosingCashCalculations.OnlineExtraKind
+                                : ClosingCashCalculations.OnlineRefundKind)
+                            : (cashEffect > 0 ? "Return extra" : "Return refund"),
+                        At = Convert.ToDateTime(reader["created_at"]),
+                        Amount = cashEffect
+                    });
                 }
             }
 
             const string orderQuery = @"
-SELECT id, date_added, grand_total
-FROM inv_orders
-WHERE DATE(date_added) = @sale_date
-  AND LOWER(TRIM(IFNULL(payment_method, 'Cash'))) = 'cash'
-ORDER BY id ASC;";
+SELECT
+    o.id,
+    o.date_added,
+    " + CouponCalculations.SqlOrderBilledSale + @" AS billed_sale
+FROM inv_orders o
+WHERE DATE(o.date_added) = @sale_date
+  AND LOWER(TRIM(IFNULL(o.payment_method, 'Cash'))) = 'cash'
+ORDER BY o.id ASC;";
 
             using (MySqlCommand cmd = new MySqlCommand(orderQuery, conn))
             {
@@ -130,20 +113,13 @@ ORDER BY id ASC;";
                 using MySqlDataReader reader = cmd.ExecuteReader();
                 while (reader.Read())
                 {
-                    int orderId = Convert.ToInt32(reader["id"]);
-                    decimal alreadyCounted = alreadyCountedByOrder.TryGetValue(orderId, out decimal counted)
-                        ? counted
-                        : 0;
-
-                    if (ClosingCashCalculations.HideSaleLineWhenExtraCollected(alreadyCounted))
-                        continue;
-
+                    decimal billedSale = Convert.ToDecimal(reader["billed_sale"], CultureInfo.InvariantCulture);
                     lines.Add(new ClosingCashBillLine
                     {
-                        OrderId = orderId,
+                        OrderId = Convert.ToInt32(reader["id"]),
                         Kind = "Sale",
                         At = Convert.ToDateTime(reader["date_added"]),
-                        Amount = Convert.ToDecimal(reader["grand_total"], CultureInfo.InvariantCulture)
+                        Amount = ClosingCashCalculations.CashBillContribution(billedSale)
                     });
                 }
             }

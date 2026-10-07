@@ -14,6 +14,7 @@ namespace BubbyPlanetShowroom
         private readonly Panel pageScroll = new Panel();
         private readonly Panel pageInner = new Panel();
         private readonly Panel topPanel = new Panel();
+        private readonly Panel titleBar = new Panel();
         private readonly FlowLayoutPanel summaryPanel = new FlowLayoutPanel();
         private readonly Panel chartPanel = new Panel();
         private readonly Panel mixChartPanel = new Panel();
@@ -51,11 +52,17 @@ namespace BubbyPlanetShowroom
         private readonly Color profitGreen = Color.FromArgb(16, 185, 129);
         private readonly Color costAmber = Color.FromArgb(245, 158, 11);
 
+        private bool _filtersReady;
+
         public Revenue()
         {
             InitUI();
-            cmbType.SelectedIndex = cmbType.Items.IndexOf("This Month");
-            LoadData();
+            _filtersReady = true;
+            int monthIndex = cmbType.Items.IndexOf("This Month");
+            if (monthIndex >= 0)
+                cmbType.SelectedIndex = monthIndex;
+            else
+                LoadData();
         }
 
         private void InitUI()
@@ -79,12 +86,9 @@ namespace BubbyPlanetShowroom
             topPanel.BackColor = pageBack;
             topPanel.Padding = new Padding(0, 0, 0, 12);
 
-            Panel titleBar = new Panel
-            {
-                Dock = DockStyle.Left,
-                Width = 420,
-                BackColor = pageBack
-            };
+            titleBar.Dock = DockStyle.Left;
+            titleBar.Width = 420;
+            titleBar.BackColor = pageBack;
 
             Label title = new Label
             {
@@ -115,6 +119,9 @@ namespace BubbyPlanetShowroom
             cmbType.Font = new Font("Segoe UI", 10);
             cmbType.SelectedIndexChanged += (s, e) =>
             {
+                if (!_filtersReady)
+                    return;
+
                 dtpDate.Visible = cmbType.Text == "Date Wise";
                 dtpFrom.Visible = cmbType.Text == "Date Range";
                 dtpTo.Visible = cmbType.Text == "Date Range";
@@ -136,7 +143,7 @@ namespace BubbyPlanetShowroom
             dtpFrom.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             dtpFrom.Format = DateTimePickerFormat.Custom;
             dtpFrom.CustomFormat = "'From' dd-MM-yy";
-            dtpFrom.Width = 128;
+            dtpFrom.Width = 156;
             dtpFrom.Font = new Font("Segoe UI", 10);
             dtpFrom.Value = DateTime.Today.AddDays(-7);
             dtpFrom.Visible = false;
@@ -149,7 +156,7 @@ namespace BubbyPlanetShowroom
             dtpTo.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             dtpTo.Format = DateTimePickerFormat.Custom;
             dtpTo.CustomFormat = "'To' dd-MM-yy";
-            dtpTo.Width = 116;
+            dtpTo.Width = 138;
             dtpTo.Font = new Font("Segoe UI", 10);
             dtpTo.Value = DateTime.Today;
             dtpTo.Visible = false;
@@ -173,9 +180,10 @@ namespace BubbyPlanetShowroom
             summaryPanel.Dock = DockStyle.Top;
             summaryPanel.Height = 168;
             summaryPanel.BackColor = pageBack;
-            summaryPanel.WrapContents = false;
-            summaryPanel.AutoScroll = true;
+            summaryPanel.WrapContents = true;
+            summaryPanel.AutoScroll = false;
             summaryPanel.Padding = new Padding(0, 2, 0, 12);
+            summaryPanel.Resize += (_, _) => FitSummaryHeight();
 
             Panel content = new Panel
             {
@@ -305,28 +313,38 @@ namespace BubbyPlanetShowroom
 
         private void PositionFilters()
         {
+            int filtersWidth = cmbType.Width + 12;
+            if (dtpDate.Visible)
+                filtersWidth += dtpDate.Width + 10;
+            if (dtpFrom.Visible)
+                filtersWidth += dtpFrom.Width + 10;
+            if (dtpTo.Visible)
+                filtersWidth += dtpTo.Width + 8;
+
+            titleBar.Width = Math.Max(180, Math.Min(420, topPanel.Width - filtersWidth - 16));
+
             int right = topPanel.Width;
             int y = 18;
 
             if (dtpDate.Visible)
             {
-                dtpDate.Location = new Point(Math.Max(0, right - dtpDate.Width), y);
+                dtpDate.Location = new Point(Math.Max(titleBar.Right + 8, right - dtpDate.Width), y);
                 right = dtpDate.Left - 10;
             }
 
             if (dtpTo.Visible)
             {
-                dtpTo.Location = new Point(Math.Max(0, right - dtpTo.Width), y);
+                dtpTo.Location = new Point(Math.Max(titleBar.Right + 8, right - dtpTo.Width), y);
                 right = dtpTo.Left - 8;
             }
 
             if (dtpFrom.Visible)
             {
-                dtpFrom.Location = new Point(Math.Max(0, right - dtpFrom.Width), y);
+                dtpFrom.Location = new Point(Math.Max(titleBar.Right + 8, right - dtpFrom.Width), y);
                 right = dtpFrom.Left - 10;
             }
 
-            cmbType.Location = new Point(Math.Max(0, right - cmbType.Width), y);
+            cmbType.Location = new Point(Math.Max(titleBar.Right + 8, right - cmbType.Width), y);
         }
 
         private void ConfigureGrid()
@@ -366,6 +384,7 @@ namespace BubbyPlanetShowroom
                 using (MySqlConnection con = DB.GetConnection())
                 {
                     con.Open();
+                    DB.EnsureOrderCouponColumns(con);
                     LoadSummary(con);
                     LoadCategoryShare(con);
                     LoadGraphGrid(con);
@@ -388,34 +407,104 @@ namespace BubbyPlanetShowroom
         {
             summaryPanel.Controls.Clear();
 
-            AddSummaryCard("Today", GetMetrics(con, "DATE(o.date_added) = CURDATE()"), salesBlue);
-            AddSummaryCard("Last 7 Days", GetMetrics(con, "DATE(o.date_added) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)"), Color.FromArgb(99, 102, 241));
-            AddSummaryCard("This Month", GetMetrics(con, "YEAR(o.date_added)=YEAR(CURDATE()) AND MONTH(o.date_added)=MONTH(CURDATE())"), costAmber);
-            AddSummaryCard("This Year", GetMetrics(con, "YEAR(o.date_added)=YEAR(CURDATE())"), profitGreen);
+            AddSummaryCard(
+                GetFilterCardTitle(),
+                GetMetrics(con, GetViewCondition()),
+                navy,
+                selected: true,
+                subtitle: GetFilterCardSubtitle());
+            AddSummaryCard("Today", GetMetrics(con, "o.date_added >= @revToday AND o.date_added < @revTodayEnd"), salesBlue);
+            AddSummaryCard("Last 7 Days", GetMetrics(con, "o.date_added >= @revLast7From AND o.date_added < @revTodayEnd"), Color.FromArgb(99, 102, 241));
+            AddSummaryCard("This Month", GetMetrics(con, "o.date_added >= @revMonthStart AND o.date_added < @revMonthEndExclusive"), costAmber);
+            AddSummaryCard("This Year", GetMetrics(con, "o.date_added >= @revYearStart AND o.date_added < @revYearEndExclusive"), profitGreen);
             AddSummaryCard("All Time", GetMetrics(con, "1=1"), Color.FromArgb(71, 85, 105));
+            FitSummaryHeight();
         }
 
-        private void AddSummaryCard(string title, MetricSnapshot metric, Color accent)
+        private void AddSummaryCard(string title, MetricSnapshot metric, Color accent, bool selected = false, string subtitle = "")
         {
-            summaryPanel.Controls.Add(CreateCard(title, metric, accent));
+            summaryPanel.Controls.Add(CreateCard(title, metric, accent, selected, subtitle));
+        }
+
+        private string GetFilterCardTitle()
+        {
+            string filter = cmbType.Text;
+            return string.IsNullOrWhiteSpace(filter) ? "This filter" : filter;
+        }
+
+        private string GetFilterCardSubtitle()
+        {
+            if (cmbType.Text == "Date Wise")
+                return dtpDate.Value.ToString("dd-MMM-yy", CultureInfo.InvariantCulture);
+
+            if (cmbType.Text == "Date Range")
+            {
+                DateTime from = dtpFrom.Value.Date;
+                DateTime to = dtpTo.Value.Date;
+                if (from > to)
+                {
+                    DateTime temp = from;
+                    from = to;
+                    to = temp;
+                }
+
+                return from.ToString("dd-MMM-yy", CultureInfo.InvariantCulture) +
+                    " → " +
+                    to.ToString("dd-MMM-yy", CultureInfo.InvariantCulture);
+            }
+
+            return "";
+        }
+
+        private void FitSummaryHeight()
+        {
+            int count = summaryPanel.Controls.Count;
+            if (count == 0)
+            {
+                summaryPanel.Height = 168;
+                return;
+            }
+
+            int cardPitch = 238;
+            int avail = Math.Max(1, summaryPanel.ClientSize.Width);
+            int perRow = Math.Max(1, avail / cardPitch);
+            int rows = (count + perRow - 1) / perRow;
+            summaryPanel.Height = 14 + rows * 148;
         }
 
         private void LoadGraphGrid(MySqlConnection con)
         {
-            tableTitle.Text = cmbType.Text == "Category Wise" ? "Category Breakdown" : "Period Breakdown";
+            tableTitle.Text = cmbType.Text == "Category Wise"
+                ? "Category Breakdown"
+                : "Bills in this filter";
             graphTitle.Text = cmbType.Text == "Category Wise" ? "Category sales vs profit" : "Sales vs Profit";
             mixTitle.Text = "Cost vs Profit";
             categoryTitle.Text = cmbType.Text == "Category Wise" ? "Payment share" : "Category share";
 
             string query = BuildPeriodQuery();
-            using (MySqlDataAdapter da = new MySqlDataAdapter(query, con))
+            using (MySqlCommand cmd = new MySqlCommand(query, con))
             {
+                BindRevenueDates(cmd);
+                using MySqlDataAdapter da = new MySqlDataAdapter(cmd);
                 graphData = new DataTable();
                 da.Fill(graphData);
             }
 
+            if (IsBillListView() && graphData.Columns.Contains("DiscountPercent"))
+            {
+                foreach (DataRow row in graphData.Rows)
+                    row["DiscountPercent"] = SellingCalculations.FormatDiscountPercentLabel(row["DiscountPercent"]?.ToString());
+            }
+
             grid.DataSource = graphData;
-            FormatGridColumns();
+            try
+            {
+                FormatGridColumns();
+            }
+            catch
+            {
+                // Column chrome must not blank the revenue page.
+            }
 
             decimal sales = SumColumn("Sales");
             decimal cost = SumColumn("Cost");
@@ -440,17 +529,26 @@ namespace BubbyPlanetShowroom
             string query = $@"
 SELECT
     {nameExpr} AS Period,
-    ROUND(IFNULL(SUM(IFNULL(d.net_amount,0)),0), 2) AS Sales
+    ROUND(IFNULL(SUM(
+        {CouponCalculations.SqlLineBilledNet}
+    ),0), 2) AS Sales
 FROM inv_orders o
 INNER JOIN inv_order_details d ON d.order_id = o.id
+INNER JOIN (
+    SELECT order_id, SUM(IFNULL(net_amount,0)) AS items_net
+    FROM inv_order_details
+    GROUP BY order_id
+) ord ON ord.order_id = o.id
 LEFT JOIN inv_items_master i ON i.id = d.item_id
 WHERE {condition}
 GROUP BY {nameExpr}
 HAVING Sales > 0
 ORDER BY Sales DESC;";
 
-            using (MySqlDataAdapter da = new MySqlDataAdapter(query, con))
+            using (MySqlCommand cmd = new MySqlCommand(query, con))
             {
+                BindRevenueDates(cmd);
+                using MySqlDataAdapter da = new MySqlDataAdapter(cmd);
                 categoryData = new DataTable();
                 da.Fill(categoryData);
             }
@@ -462,179 +560,266 @@ ORDER BY Sales DESC;";
                 return "1=1";
 
             if (cmbType.Text == "Date Wise")
-            {
-                string selectedDate = dtpDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-                return $"DATE(o.date_added) = '{selectedDate}'";
-            }
+                return "o.date_added >= @revDateWise AND o.date_added < @revDateWiseEnd";
 
             if (cmbType.Text == "Date Range")
-            {
-                DateTime from = dtpFrom.Value.Date;
-                DateTime to = dtpTo.Value.Date;
-                if (from > to)
-                {
-                    DateTime temp = from;
-                    from = to;
-                    to = temp;
-                }
-
-                string fromSql = from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-                string toSql = to.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-                return $"DATE(o.date_added) BETWEEN '{fromSql}' AND '{toSql}'";
-            }
+                return "o.date_added >= @revRangeFrom AND o.date_added < @revRangeToExclusive";
 
             if (cmbType.Text == "Today")
-                return "DATE(o.date_added) = CURDATE()";
+                return "o.date_added >= @revToday AND o.date_added < @revTodayEnd";
 
             if (cmbType.Text == "Last 7 Days")
-                return "DATE(o.date_added) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)";
+                return "o.date_added >= @revLast7From AND o.date_added < @revTodayEnd";
 
             if (cmbType.Text == "This Year")
-                return "YEAR(o.date_added)=YEAR(CURDATE())";
+                return "o.date_added >= @revYearStart AND o.date_added < @revYearEndExclusive";
 
-            return "YEAR(o.date_added)=YEAR(CURDATE()) AND MONTH(o.date_added)=MONTH(CURDATE())";
+            return "o.date_added >= @revMonthStart AND o.date_added < @revMonthEndExclusive";
         }
 
         private string BuildPeriodQuery()
         {
+            string condition = GetViewCondition();
+            if (IsBillListView())
+                return BuildBillListQuery(condition);
+
             string periodSql;
             string sortSql;
-            string condition;
-            string groupSql;
             string orderSql;
 
             if (cmbType.Text == "Category Wise")
             {
                 periodSql = "IFNULL(NULLIF(TRIM(i.main_category), ''), 'Other')";
                 sortSql = "IFNULL(NULLIF(TRIM(i.main_category), ''), 'Other')";
-                condition = "1=1";
-                groupSql = "IFNULL(NULLIF(TRIM(i.main_category), ''), 'Other')";
                 orderSql = "Profit DESC";
-            }
-            else if (cmbType.Text == "Date Wise")
-            {
-                string selectedDate = dtpDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-                periodSql = "DATE_FORMAT(o.date_added, '%h %p')";
-                sortSql = "HOUR(o.date_added)";
-                condition = $"DATE(o.date_added) = '{selectedDate}'";
-                groupSql = "HOUR(o.date_added), DATE_FORMAT(o.date_added, '%h %p')";
-                orderSql = "sort_key ASC";
             }
             else if (cmbType.Text == "Date Range")
             {
-                DateTime from = dtpFrom.Value.Date;
-                DateTime to = dtpTo.Value.Date;
-                if (from > to)
-                {
-                    DateTime temp = from;
-                    from = to;
-                    to = temp;
-                }
-
-                string fromSql = from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-                string toSql = to.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-
                 periodSql = "DATE_FORMAT(o.date_added, '%d %b')";
                 sortSql = "DATE(o.date_added)";
-                condition = $"DATE(o.date_added) BETWEEN '{fromSql}' AND '{toSql}'";
-                groupSql = "DATE(o.date_added), DATE_FORMAT(o.date_added, '%d %b')";
-                orderSql = "sort_key ASC";
-            }
-            else if (cmbType.Text == "Today")
-            {
-                periodSql = "DATE_FORMAT(o.date_added, '%h %p')";
-                sortSql = "HOUR(o.date_added)";
-                condition = "DATE(o.date_added) = CURDATE()";
-                groupSql = "HOUR(o.date_added), DATE_FORMAT(o.date_added, '%h %p')";
                 orderSql = "sort_key ASC";
             }
             else if (cmbType.Text == "Last 7 Days")
             {
                 periodSql = "DATE_FORMAT(o.date_added, '%d %b')";
                 sortSql = "DATE(o.date_added)";
-                condition = "DATE(o.date_added) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)";
-                groupSql = "DATE(o.date_added), DATE_FORMAT(o.date_added, '%d %b')";
                 orderSql = "sort_key DESC";
             }
             else if (cmbType.Text == "This Year")
             {
                 periodSql = "DATE_FORMAT(o.date_added, '%b %Y')";
                 sortSql = "DATE_FORMAT(o.date_added, '%Y-%m')";
-                condition = "YEAR(o.date_added)=YEAR(CURDATE())";
-                groupSql = "DATE_FORMAT(o.date_added, '%Y-%m'), DATE_FORMAT(o.date_added, '%b %Y')";
                 orderSql = "sort_key ASC";
             }
             else if (cmbType.Text == "Till Date")
             {
                 periodSql = "DATE_FORMAT(o.date_added, '%b %Y')";
                 sortSql = "DATE_FORMAT(o.date_added, '%Y-%m')";
-                condition = "1=1";
-                groupSql = "DATE_FORMAT(o.date_added, '%Y-%m'), DATE_FORMAT(o.date_added, '%b %Y')";
                 orderSql = "sort_key DESC";
             }
             else
             {
                 periodSql = "DATE_FORMAT(o.date_added, '%d %b')";
                 sortSql = "DATE(o.date_added)";
-                condition = "YEAR(o.date_added)=YEAR(CURDATE()) AND MONTH(o.date_added)=MONTH(CURDATE())";
-                groupSql = "DATE(o.date_added), DATE_FORMAT(o.date_added, '%d %b')";
                 orderSql = "sort_key DESC";
             }
 
-            return $@"
+            if (cmbType.Text == "Category Wise")
+            {
+                return $@"
 SELECT
-    {periodSql} AS Period,
+    IFNULL(NULLIF(TRIM(i.main_category), ''), 'Other') AS Period,
     COUNT(DISTINCT o.id) AS Orders,
     SUM(GREATEST(IFNULL(d.qty,0) - IFNULL(d.return_qty,0), 0)) AS Qty,
-    ROUND(IFNULL(SUM(IFNULL(d.net_amount,0)),0), 2) AS Sales,
+    ROUND(IFNULL(SUM(
+        {CouponCalculations.SqlLineBilledNet}
+    ),0), 2) AS Sales,
     ROUND(IFNULL(SUM(IFNULL(i.cost_price,0) * GREATEST(IFNULL(d.qty,0) - IFNULL(d.return_qty,0), 0)),0), 2) AS Cost,
     ROUND(
-        IFNULL(SUM(IFNULL(d.net_amount,0)),0) -
+        IFNULL(SUM(
+            {CouponCalculations.SqlLineBilledNet}
+        ),0) -
         IFNULL(SUM(IFNULL(i.cost_price,0) * GREATEST(IFNULL(d.qty,0) - IFNULL(d.return_qty,0), 0)),0),
         2
     ) AS Profit,
     ROUND(
         CASE
-            WHEN IFNULL(SUM(IFNULL(d.net_amount,0)),0) = 0 THEN 0
+            WHEN IFNULL(SUM(
+                {CouponCalculations.SqlLineBilledNet}
+            ),0) = 0 THEN 0
             ELSE (
                 (
-                    IFNULL(SUM(IFNULL(d.net_amount,0)),0) -
+                    IFNULL(SUM(
+                        {CouponCalculations.SqlLineBilledNet}
+                    ),0) -
                     IFNULL(SUM(IFNULL(i.cost_price,0) * GREATEST(IFNULL(d.qty,0) - IFNULL(d.return_qty,0), 0)),0)
-                ) / IFNULL(SUM(IFNULL(d.net_amount,0)),0)
+                ) / IFNULL(SUM(
+                    {CouponCalculations.SqlLineBilledNet}
+                ),0)
             ) * 100
         END,
         2
     ) AS ProfitPercent,
-    {sortSql} AS sort_key
+    IFNULL(NULLIF(TRIM(i.main_category), ''), 'Other') AS sort_key
 FROM inv_orders o
 INNER JOIN inv_order_details d ON d.order_id = o.id
+INNER JOIN (
+    SELECT order_id, SUM(IFNULL(net_amount,0)) AS items_net
+    FROM inv_order_details
+    GROUP BY order_id
+) ord ON ord.order_id = o.id
 LEFT JOIN inv_items_master i ON i.id = d.item_id
 WHERE {condition}
-GROUP BY {groupSql}
+GROUP BY IFNULL(NULLIF(TRIM(i.main_category), ''), 'Other')
 HAVING Sales > 0 OR Cost > 0
+ORDER BY Profit DESC;";
+            }
+
+            return $@"
+SELECT
+    Period,
+    COUNT(*) AS Orders,
+    SUM(Qty) AS Qty,
+    ROUND(SUM(Sales), 2) AS Sales,
+    ROUND(SUM(Cost), 2) AS Cost,
+    ROUND(SUM(Sales) - SUM(Cost), 2) AS Profit,
+    ROUND(
+        CASE
+            WHEN SUM(Sales) = 0 THEN 0
+            ELSE ((SUM(Sales) - SUM(Cost)) / SUM(Sales)) * 100
+        END,
+        2
+    ) AS ProfitPercent,
+    sort_key
+FROM (
+    SELECT
+        {periodSql} AS Period,
+        {sortSql} AS sort_key,
+        GREATEST(0, ord.items_net - {CouponCalculations.SqlCouponOutsideLines}) AS Sales,
+        ord.Cost AS Cost,
+        ord.Qty AS Qty
+    FROM inv_orders o
+    LEFT JOIN (
+        SELECT
+            d.order_id,
+            SUM(IFNULL(d.net_amount,0)) AS items_net,
+            SUM(IFNULL(i.cost_price,0) * GREATEST(IFNULL(d.qty,0) - IFNULL(d.return_qty,0), 0)) AS Cost,
+            SUM(GREATEST(IFNULL(d.qty,0) - IFNULL(d.return_qty,0), 0)) AS Qty
+        FROM inv_order_details d
+        LEFT JOIN inv_items_master i ON i.id = d.item_id
+        GROUP BY d.order_id
+    ) ord ON ord.order_id = o.id
+    WHERE {condition}
+) billed
+GROUP BY Period, sort_key
 ORDER BY {orderSql};";
         }
 
+        private bool IsBillListView()
+        {
+            return cmbType.Text != "Category Wise";
+        }
+
+        private void BindRevenueDates(MySqlCommand cmd)
+        {
+            DateTime today = DateTime.Today;
+            DateTime rangeFrom = dtpFrom.Value.Date;
+            DateTime rangeTo = dtpTo.Value.Date;
+            if (rangeFrom > rangeTo)
+            {
+                DateTime swap = rangeFrom;
+                rangeFrom = rangeTo;
+                rangeTo = swap;
+            }
+
+            cmd.Parameters.AddWithValue("@revToday", today);
+            cmd.Parameters.AddWithValue("@revTodayEnd", today.AddDays(1));
+            cmd.Parameters.AddWithValue("@revLast7From", today.AddDays(-7));
+            cmd.Parameters.AddWithValue("@revMonthStart", new DateTime(today.Year, today.Month, 1));
+            cmd.Parameters.AddWithValue("@revMonthEndExclusive", new DateTime(today.Year, today.Month, 1).AddMonths(1));
+            cmd.Parameters.AddWithValue("@revYearStart", new DateTime(today.Year, 1, 1));
+            cmd.Parameters.AddWithValue("@revYearEndExclusive", new DateTime(today.Year + 1, 1, 1));
+            cmd.Parameters.AddWithValue("@revDateWise", dtpDate.Value.Date);
+            cmd.Parameters.AddWithValue("@revDateWiseEnd", dtpDate.Value.Date.AddDays(1));
+            cmd.Parameters.AddWithValue("@revRangeFrom", rangeFrom);
+            cmd.Parameters.AddWithValue("@revRangeToExclusive", rangeTo.AddDays(1));
+        }
+
+        private string BuildBillListQuery(string condition)
+        {
+            return $@"
+SELECT
+    CONCAT('#', o.id, '  ', DATE_FORMAT(o.date_added, '%d-%m-%Y %H:%i')) AS Period,
+    IFNULL(NULLIF(TRIM(o.created_by), ''), '—') AS CreatedBy,
+    ROUND(IFNULL(ord.line_discount,0) + {CouponCalculations.SqlCouponOutsideLines}, 2) AS Discount,
+    IFNULL(ord.discount_pcts,'') AS DiscountPercent,
+    CASE
+        WHEN IFNULL(NULLIF(TRIM(o.coupon_code), ''), '') = '' THEN
+            CASE WHEN IFNULL(o.coupon_discount,0) > 0 THEN CONCAT('₹', FORMAT(o.coupon_discount, 2)) ELSE '—' END
+        ELSE CONCAT(o.coupon_code,
+            CASE WHEN IFNULL(o.coupon_discount,0) > 0 THEN CONCAT('  ₹', FORMAT(o.coupon_discount, 2)) ELSE '' END)
+    END AS Coupon,
+    1 AS Orders,
+    IFNULL(ord.Qty, 0) AS Qty,
+    ROUND(GREATEST(0, IFNULL(ord.items_net,0) - {CouponCalculations.SqlCouponOutsideLines}), 2) AS Sales,
+    ROUND(IFNULL(ord.Cost, 0), 2) AS Cost,
+    ROUND(GREATEST(0, IFNULL(ord.items_net,0) - {CouponCalculations.SqlCouponOutsideLines}) - IFNULL(ord.Cost, 0), 2) AS Profit,
+    ROUND(
+        CASE
+            WHEN GREATEST(0, IFNULL(ord.items_net,0) - {CouponCalculations.SqlCouponOutsideLines}) = 0 THEN 0
+            ELSE (
+                (GREATEST(0, IFNULL(ord.items_net,0) - {CouponCalculations.SqlCouponOutsideLines}) - IFNULL(ord.Cost, 0))
+                / GREATEST(0, IFNULL(ord.items_net,0) - {CouponCalculations.SqlCouponOutsideLines})
+            ) * 100
+        END,
+        2
+    ) AS ProfitPercent,
+    o.id AS sort_key
+FROM inv_orders o
+LEFT JOIN (
+    SELECT
+        d.order_id,
+        SUM(IFNULL(d.net_amount,0)) AS items_net,
+        SUM(IFNULL(d.discount_amount,0)) AS line_discount,
+        GROUP_CONCAT(ROUND(IFNULL(d.discount_percent,0), 1) SEPARATOR ',') AS discount_pcts,
+        SUM(IFNULL(i.cost_price,0) * GREATEST(IFNULL(d.qty,0) - IFNULL(d.return_qty,0), 0)) AS Cost,
+        SUM(GREATEST(IFNULL(d.qty,0) - IFNULL(d.return_qty,0), 0)) AS Qty
+    FROM inv_order_details d
+    LEFT JOIN inv_items_master i ON i.id = d.item_id
+    GROUP BY d.order_id
+) ord ON ord.order_id = o.id
+WHERE {condition}
+ORDER BY o.date_added ASC, o.id ASC;";
+        }
+
         /// <summary>
-        /// Billed sales from order lines. Live DB keeps SUM(net_amount)
-        /// equal to inv_orders.grand_total, so this matches Selling Total Sale.
+        /// Billed sales after coupon. Matches Selling Total Sale and cash collected.
         /// </summary>
         private MetricSnapshot GetMetrics(MySqlConnection con, string condition)
         {
             string query = $@"
 SELECT
-    IFNULL(SUM(IFNULL(d.net_amount,0)),0) AS Sales,
-    IFNULL(SUM(IFNULL(i.cost_price,0) * GREATEST(IFNULL(d.qty,0) - IFNULL(d.return_qty,0), 0)),0) AS Cost,
-    COUNT(DISTINCT o.id) AS Orders,
-    IFNULL(SUM(GREATEST(IFNULL(d.qty,0) - IFNULL(d.return_qty,0), 0)),0) AS Qty
+    IFNULL(SUM(GREATEST(0, ord.items_net - {CouponCalculations.SqlCouponOutsideLines})),0) AS Sales,
+    IFNULL(SUM(ord.Cost),0) AS Cost,
+    COUNT(o.id) AS Orders,
+    IFNULL(SUM(ord.Qty),0) AS Qty
 FROM inv_orders o
-INNER JOIN inv_order_details d ON d.order_id = o.id
-LEFT JOIN inv_items_master i ON i.id = d.item_id
+LEFT JOIN (
+    SELECT
+        d.order_id,
+        SUM(IFNULL(d.net_amount,0)) AS items_net,
+        SUM(IFNULL(i.cost_price,0) * GREATEST(IFNULL(d.qty,0) - IFNULL(d.return_qty,0), 0)) AS Cost,
+        SUM(GREATEST(IFNULL(d.qty,0) - IFNULL(d.return_qty,0), 0)) AS Qty
+    FROM inv_order_details d
+    LEFT JOIN inv_items_master i ON i.id = d.item_id
+    GROUP BY d.order_id
+) ord ON ord.order_id = o.id
 WHERE {condition};";
 
             using (MySqlCommand cmd = new MySqlCommand(query, con))
-            using (MySqlDataReader reader = cmd.ExecuteReader())
             {
+                BindRevenueDates(cmd);
+                using MySqlDataReader reader = cmd.ExecuteReader();
                 if (!reader.Read())
                     return new MetricSnapshot();
 
@@ -675,9 +860,18 @@ WHERE {condition};";
             if (grid.Columns.Contains("sort_key"))
                 grid.Columns["sort_key"].Visible = false;
 
-            SetHeader("Period", cmbType.Text == "Category Wise" ? "Category" : "Period");
+            bool billList = IsBillListView();
+            SetHeader("Period", cmbType.Text == "Category Wise" ? "Category" : (billList ? "Bill" : "Period"));
+            SetHeader("CreatedBy", "Billed by");
+            SetHeader("Coupon", "Coupon");
             SetHeader("Orders", "Bills");
             SetHeader("Qty", "Qty Sold");
+            SetMoneyColumn("Discount", "Discount");
+            if (grid.Columns.Contains("DiscountPercent"))
+            {
+                grid.Columns["DiscountPercent"].HeaderText = "Disc %";
+                grid.Columns["DiscountPercent"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+            }
             SetMoneyColumn("Sales", "Sell Amount");
             SetMoneyColumn("Cost", "Cost Amount");
             SetMoneyColumn("Profit", "Profit");
@@ -689,11 +883,50 @@ WHERE {condition};";
                 grid.Columns["ProfitPercent"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
             }
 
-            foreach (DataGridViewColumn col in grid.Columns)
+            DataGridViewAutoSizeColumnsMode previousMode = grid.AutoSizeColumnsMode;
+            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+
+            try
             {
-                if (col.Name != "Period")
-                    col.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
-                col.MinimumWidth = col.Name == "Period" ? 100 : 88;
+                foreach (DataGridViewColumn col in grid.Columns)
+                {
+                    if (col == null)
+                        continue;
+
+                    if (col.Name != "Period" && col.Name != "CreatedBy" && col.Name != "Coupon")
+                        col.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+
+                    if (!col.Visible)
+                        continue;
+
+                    col.FillWeight = col.Name switch
+                    {
+                        "Period" => 22f,
+                        "CreatedBy" => 14f,
+                        "Discount" => 11f,
+                        "DiscountPercent" => 12f,
+                        "Coupon" => 12f,
+                        _ => 10f
+                    };
+                    int minWidth = col.Name switch
+                    {
+                        "Period" => billList ? 140 : 100,
+                        "CreatedBy" => 90,
+                        "Discount" => 80,
+                        "DiscountPercent" => 110,
+                        "Coupon" => 80,
+                        _ => 72
+                    };
+                    if (minWidth < 2)
+                        minWidth = 2;
+                    if (col.Width < minWidth)
+                        col.Width = minWidth;
+                    col.MinimumWidth = minWidth;
+                }
+            }
+            finally
+            {
+                grid.AutoSizeColumnsMode = previousMode;
             }
         }
 
@@ -716,23 +949,25 @@ WHERE {condition};";
                 grid.Columns[columnName].DefaultCellStyle.ForeColor = profitGreen;
         }
 
-        private Panel CreateCard(string title, MetricSnapshot metric, Color accent)
+        private Panel CreateCard(string title, MetricSnapshot metric, Color accent, bool selected = false, string subtitle = "")
         {
             RoundedPanel p = new RoundedPanel
             {
                 Width = 224,
                 Height = 138,
-                BackColor = Color.White,
+                BackColor = selected ? Color.FromArgb(239, 246, 255) : Color.White,
                 Radius = 8,
-                Margin = new Padding(0, 0, 14, 0),
-                Padding = new Padding(14)
+                Margin = new Padding(0, 0, 14, 10),
+                Padding = new Padding(14),
+                ClipToRoundRegion = false,
+                BorderColor = selected ? navy : Color.FromArgb(226, 232, 240)
             };
 
             Panel accentLine = new Panel
             {
                 BackColor = accent,
                 Dock = DockStyle.Left,
-                Width = 4
+                Width = selected ? 5 : 4
             };
 
             Label titleLabel = new Label
@@ -743,7 +978,7 @@ WHERE {condition};";
                 Height = 22,
                 Location = new Point(18, 12),
                 Font = new Font("Segoe UI Semibold", 9, FontStyle.Bold),
-                ForeColor = textMuted
+                ForeColor = selected ? navy : textMuted
             };
 
             Label salesLabel = new Label
@@ -780,15 +1015,19 @@ WHERE {condition};";
                 ForeColor = metric.Profit >= 0 ? profitGreen : Color.FromArgb(220, 38, 38)
             };
 
+            string qtyText = $"{metric.Orders} bills  |  {metric.Qty} pcs";
+            if (selected && !string.IsNullOrWhiteSpace(subtitle))
+                qtyText = subtitle + "  ·  " + metric.Orders + " bills";
+
             Label qtyLabel = new Label
             {
-                Text = $"{metric.Orders} bills  |  {metric.Qty} pcs",
+                Text = qtyText,
                 AutoSize = false,
                 Width = 188,
                 Height = 18,
                 Location = new Point(18, 114),
                 Font = new Font("Segoe UI", 8),
-                ForeColor = textMuted
+                ForeColor = selected ? navy : textMuted
             };
 
             p.Controls.Add(qtyLabel);
@@ -1124,6 +1363,7 @@ WHERE {condition};";
         {
             public int Radius { get; set; } = 8;
             public bool ClipToRoundRegion { get; set; } = true;
+            public Color BorderColor { get; set; } = Color.FromArgb(226, 232, 240);
 
             protected override void OnPaint(PaintEventArgs e)
             {
@@ -1134,7 +1374,7 @@ WHERE {condition};";
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
                 using (GraphicsPath path = CreatePath(ClientRectangle, Radius))
-                using (Pen pen = new Pen(Color.FromArgb(226, 232, 240)))
+                using (Pen pen = new Pen(BorderColor))
                 {
                     if (ClipToRoundRegion)
                         Region = new Region(path);

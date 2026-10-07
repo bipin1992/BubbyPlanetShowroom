@@ -387,6 +387,15 @@ namespace BubbyPlanetShowroom
             // Two-tone brand mark (Bubby=blue, planet=green) — full "y" visible
             using Font brandFont = new Font("Segoe UI", 28f, FontStyle.Bold, GraphicsUnit.Point);
             BrandNameLabel.DrawBrand(e.Graphics, brandFont, new Point(40, 48));
+
+            using Font versionFont = new Font("Segoe UI", 10f, FontStyle.Bold, GraphicsUnit.Point);
+            TextRenderer.DrawText(
+                e.Graphics,
+                AppVersion.Display,
+                versionFont,
+                new Rectangle(40, 96, brandPanel.Width - 80, 22),
+                Color.FromArgb(204, 251, 241),
+                TextFormatFlags.Left | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
         }
 
         private static Label MakeChip(string text, Color bg, int left, int top)
