@@ -23,6 +23,20 @@ namespace BubbyPlanetShowroom
             return (code ?? "").Trim().ToUpperInvariant();
         }
 
+        public static bool IsOneCouponCode(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return true;
+
+            foreach (char ch in raw.Trim())
+            {
+                if (char.IsWhiteSpace(ch) || ch == ',' || ch == ';' || ch == '+' || ch == '/' || ch == '|')
+                    return false;
+            }
+
+            return true;
+        }
+
         public static bool IsDateRangeValid(DateTime validFrom, DateTime validTo)
         {
             return validTo.Date >= validFrom.Date;

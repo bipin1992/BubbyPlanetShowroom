@@ -5,7 +5,7 @@ namespace BubbyPlanetShowroom
     /// </summary>
     internal static class AppVersion
     {
-        public const string ReleaseDate = "06-Oct-2026";
+        public const string ReleaseDate = "07-Oct-2026";
 
         public static string Display => "Version " + ReleaseDate;
     }

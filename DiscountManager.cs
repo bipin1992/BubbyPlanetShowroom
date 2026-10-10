@@ -45,9 +45,13 @@ namespace BubbyPlanetShowroom
         NumericUpDown nudCouponMinAmount;
         NumericUpDown nudCouponDiscountAmount;
         CheckBox chkCouponActive;
+        RadioButton rdoCouponAll;
+        RadioButton rdoCouponSpecial;
         int editingCouponId = 0;
         DataTable? couponsTable;
         Panel couponsPage = new Panel();
+        NumericUpDown nudCouponUsesPerPhone;
+        TopCustomersPage topCustomersPage;
 
         public DiscountManager(string role = "")
         {
@@ -73,10 +77,13 @@ namespace BubbyPlanetShowroom
             };
             TabPage rulesTab = new TabPage("Discount Rules");
             TabPage couponsTab = new TabPage("Coupons");
+            TabPage topTab = new TabPage("Top Customers");
             Panel rulesPage = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
             couponsPage = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+            topCustomersPage = new TopCustomersPage { Dock = DockStyle.Fill };
             rulesTab.Controls.Add(rulesPage);
             couponsTab.Controls.Add(couponsPage);
+            topTab.Controls.Add(topCustomersPage);
 
             TableLayoutPanel rulesRoot = new TableLayoutPanel
             {
@@ -273,10 +280,13 @@ namespace BubbyPlanetShowroom
             BuildCouponsPage();
             tabs.TabPages.Add(rulesTab);
             tabs.TabPages.Add(couponsTab);
+            tabs.TabPages.Add(topTab);
             tabs.SelectedIndexChanged += (_, _) =>
             {
                 if (tabs.SelectedTab == couponsTab)
                     BeginInvoke(new Action(ReloadCoupons));
+                else if (tabs.SelectedTab == topTab)
+                    BeginInvoke(new Action(topCustomersPage.Reload));
             };
             this.Controls.Add(tabs);
 
@@ -290,6 +300,7 @@ namespace BubbyPlanetShowroom
                 btnDelete.Enabled = false;
                 formPanel.Enabled = false;
                 couponsPage.Enabled = false;
+                topCustomersPage.Enabled = false;
             }
         }
 
@@ -713,7 +724,7 @@ WHERE id=@id;", conn);
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 164F));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 198F));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 24F));
 
@@ -723,7 +734,7 @@ WHERE id=@id;", conn);
                 TextAlign = ContentAlignment.MiddleLeft,
                 Font = new Font("Segoe UI", 10, FontStyle.Bold),
                 Padding = new Padding(12, 0, 0, 0),
-                Text = "Coupons — min purchase amount and rupee discount"
+                Text = "Coupons — choose All customers or Special customers before you save"
             };
 
             Panel topBar = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12, 6, 12, 6) };
@@ -746,16 +757,17 @@ WHERE id=@id;", conn);
                 Padding = new Padding(12, 8, 12, 8),
                 BackColor = Color.White,
                 ColumnCount = 4,
-                RowCount = 4
+                RowCount = 5
             };
-            form.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100F));
+            form.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110F));
             form.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
             form.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100F));
             form.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
             form.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
             form.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
             form.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
-            form.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
+            form.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+            form.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
 
             txtCouponCode = new TextBox { Dock = DockStyle.Fill, PlaceholderText = "e.g. BUBBY10" };
             txtCouponTitle = new TextBox { Dock = DockStyle.Fill, PlaceholderText = "e.g. Instagram 10% festive offer" };
@@ -798,24 +810,61 @@ WHERE id=@id;", conn);
                 if (dtValidTo.Value.Date < dtValidFrom.Value.Date)
                     dtValidTo.Value = dtValidFrom.Value.Date;
             };
+            nudCouponUsesPerPhone = new NumericUpDown
+            {
+                Dock = DockStyle.Fill,
+                Minimum = 1,
+                Maximum = 99,
+                DecimalPlaces = 0,
+                Value = 1
+            };
             chkCouponActive = new CheckBox { Text = "Active", Checked = true, AutoSize = true, Dock = DockStyle.Left };
+            rdoCouponAll = new RadioButton
+            {
+                Text = "All customers (new and old)",
+                Checked = true,
+                AutoSize = true,
+                Margin = new Padding(0, 6, 18, 0)
+            };
+            rdoCouponSpecial = new RadioButton
+            {
+                Text = "Special customers only",
+                AutoSize = true,
+                Margin = new Padding(0, 6, 0, 0)
+            };
+            rdoCouponAll.CheckedChanged += (_, _) => ApplyCouponAudience();
+            var who = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                Margin = new Padding(0)
+            };
+            who.Controls.Add(rdoCouponAll);
+            who.Controls.Add(rdoCouponSpecial);
 
-            form.Controls.Add(new Label { Text = "Code", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 0, 0);
-            form.Controls.Add(txtCouponCode, 1, 0);
-            form.Controls.Add(new Label { Text = "Title", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 2, 0);
-            form.Controls.Add(txtCouponTitle, 3, 0);
-            form.Controls.Add(new Label { Text = "Valid From", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 0, 1);
-            form.Controls.Add(dtValidFrom, 1, 1);
-            form.Controls.Add(new Label { Text = "Valid To", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 2, 1);
-            form.Controls.Add(dtValidTo, 3, 1);
-            form.Controls.Add(new Label { Text = "Min Amount", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 0, 2);
-            form.Controls.Add(nudCouponMinAmount, 1, 2);
-            form.Controls.Add(new Label { Text = "Discount ₹", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 2, 2);
-            form.Controls.Add(nudCouponDiscountAmount, 3, 2);
-            form.Controls.Add(chkCouponActive, 1, 3);
+            form.Controls.Add(new Label { Text = "For", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 0, 0);
+            form.Controls.Add(who, 1, 0);
+            form.SetColumnSpan(who, 3);
+            form.Controls.Add(new Label { Text = "Code", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 0, 1);
+            form.Controls.Add(txtCouponCode, 1, 1);
+            form.Controls.Add(new Label { Text = "Title", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 2, 1);
+            form.Controls.Add(txtCouponTitle, 3, 1);
+            form.Controls.Add(new Label { Text = "Valid From", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 0, 2);
+            form.Controls.Add(dtValidFrom, 1, 2);
+            form.Controls.Add(new Label { Text = "Valid To", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 2, 2);
+            form.Controls.Add(dtValidTo, 3, 2);
+            form.Controls.Add(new Label { Text = "Min Amount", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 0, 3);
+            form.Controls.Add(nudCouponMinAmount, 1, 3);
+            form.Controls.Add(new Label { Text = "Discount ₹", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 2, 3);
+            form.Controls.Add(nudCouponDiscountAmount, 3, 3);
+            form.Controls.Add(new Label { Text = "Uses / phone", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 0, 4);
+            form.Controls.Add(nudCouponUsesPerPhone, 1, 4);
+            form.Controls.Add(chkCouponActive, 2, 4);
             Button btnSaveInline = new Button { Text = "Save Coupon", Dock = DockStyle.Fill };
             btnSaveInline.Click += (_, _) => UpsertCoupon();
-            form.Controls.Add(btnSaveInline, 3, 3);
+            form.Controls.Add(btnSaveInline, 3, 4);
+            ApplyCouponAudience();
 
             dgvCoupons = new DataGridView
             {
@@ -842,7 +891,8 @@ WHERE id=@id;", conn);
             dgvCoupons.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9, FontStyle.Bold);
             dgvCoupons.Columns.Add(new DataGridViewTextBoxColumn { Name = "id", DataPropertyName = "id", HeaderText = "ID", FillWeight = 8 });
             dgvCoupons.Columns.Add(new DataGridViewTextBoxColumn { Name = "coupon_code", DataPropertyName = "coupon_code", HeaderText = "Code", FillWeight = 16 });
-            dgvCoupons.Columns.Add(new DataGridViewTextBoxColumn { Name = "title", DataPropertyName = "title", HeaderText = "Title", FillWeight = 24 });
+            dgvCoupons.Columns.Add(new DataGridViewTextBoxColumn { Name = "title", DataPropertyName = "title", HeaderText = "Title", FillWeight = 20 });
+            dgvCoupons.Columns.Add(new DataGridViewTextBoxColumn { Name = "audience", DataPropertyName = "audience", HeaderText = "For", FillWeight = 16 });
             dgvCoupons.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "min_purchase_amount",
@@ -858,6 +908,13 @@ WHERE id=@id;", conn);
                 HeaderText = "Discount ₹",
                 FillWeight = 12,
                 DefaultCellStyle = new DataGridViewCellStyle { Format = "0.00" }
+            });
+            dgvCoupons.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "uses_per_phone",
+                DataPropertyName = "uses_per_phone",
+                HeaderText = "Uses / phone",
+                FillWeight = 12
             });
             dgvCoupons.Columns.Add(new DataGridViewTextBoxColumn
             {
@@ -886,7 +943,7 @@ WHERE id=@id;", conn);
                 TextAlign = ContentAlignment.MiddleLeft,
                 Padding = new Padding(12, 0, 0, 0),
                 ForeColor = Color.FromArgb(71, 85, 105),
-                Text = ""
+                Text = "All customers: any mobile, limited by Uses / phone. Special customers: only mobiles you assign on Top Customers."
             };
 
             root.Controls.Add(title, 0, 0);
@@ -908,7 +965,10 @@ WHERE id=@id;", conn);
                 DB.EnsureCouponSchema(conn);
 
                 using var da = new MySqlDataAdapter(
-                    "SELECT id, coupon_code, title, min_purchase_amount, discount_amount, valid_from, valid_to, is_active FROM inv_coupons ORDER BY is_active DESC, valid_to DESC, coupon_code",
+                    @"SELECT id, coupon_code, title, min_purchase_amount, discount_amount, uses_per_phone, valid_from, valid_to, is_active, for_special,
+(SELECT COUNT(*) FROM inv_coupon_phones p WHERE p.coupon_id = inv_coupons.id) AS assigned_phones
+FROM inv_coupons
+ORDER BY is_active DESC, valid_to DESC, coupon_code",
                     conn);
 
                 couponsTable = new DataTable();
@@ -917,6 +977,8 @@ WHERE id=@id;", conn);
                     couponsTable.Columns.Add("status", typeof(string));
                 if (!couponsTable.Columns.Contains("active_text"))
                     couponsTable.Columns.Add("active_text", typeof(string));
+                if (!couponsTable.Columns.Contains("audience"))
+                    couponsTable.Columns.Add("audience", typeof(string));
 
                 DateTime today = DateTime.Today;
                 foreach (DataRow row in couponsTable.Rows)
@@ -926,6 +988,9 @@ WHERE id=@id;", conn);
                     bool active = CouponCalculations.ToBool(row["is_active"]);
                     row["status"] = CouponCalculations.StatusOn(today, from, to, active);
                     row["active_text"] = active ? "Yes" : "No";
+                    int assigned = Convert.ToInt32(row["assigned_phones"]);
+                    bool special = CouponCalculations.ToBool(row["for_special"]) || assigned > 0;
+                    row["audience"] = special ? "Special" : "All customers";
                 }
 
                 dgvCoupons.DataSource = null;
@@ -950,7 +1015,10 @@ WHERE id=@id;", conn);
             dtValidTo.Value = DateTime.Today;
             nudCouponMinAmount.Value = 0;
             nudCouponDiscountAmount.Value = 0;
+            nudCouponUsesPerPhone.Value = 1;
             chkCouponActive.Checked = true;
+            rdoCouponAll.Checked = true;
+            ApplyCouponAudience();
             btnCouponSave.Text = "Add Coupon";
             lblCouponStatus.Text = couponsTable == null
                 ? "New coupon."
@@ -973,6 +1041,10 @@ WHERE id=@id;", conn);
             nudCouponMinAmount.Value = Math.Min(nudCouponMinAmount.Maximum, Math.Max(nudCouponMinAmount.Minimum, minAmount));
             decimal discountAmount = CouponCalculations.ToAmount(dgvCoupons.CurrentRow.Cells["discount_amount"]?.Value);
             nudCouponDiscountAmount.Value = Math.Min(nudCouponDiscountAmount.Maximum, Math.Max(nudCouponDiscountAmount.Minimum, discountAmount));
+            int usesPerPhone = (int)CouponCalculations.ToAmount(dgvCoupons.CurrentRow.Cells["uses_per_phone"]?.Value);
+            if (usesPerPhone < 1)
+                usesPerPhone = 1;
+            nudCouponUsesPerPhone.Value = Math.Min(nudCouponUsesPerPhone.Maximum, usesPerPhone);
 
             DateTime from = CouponCalculations.ToDate(dgvCoupons.CurrentRow.Cells["valid_from"]?.Value);
             DateTime to = CouponCalculations.ToDate(dgvCoupons.CurrentRow.Cells["valid_to"]?.Value);
@@ -987,8 +1059,22 @@ WHERE id=@id;", conn);
             chkCouponActive.Checked = CouponCalculations.ToBool(activeObj)
                 || string.Equals(activeObj?.ToString(), "Yes", StringComparison.OrdinalIgnoreCase);
 
+            string audience = dgvCoupons.CurrentRow.Cells["audience"]?.Value?.ToString() ?? "";
+            if (string.Equals(audience, "Special", StringComparison.OrdinalIgnoreCase))
+                rdoCouponSpecial.Checked = true;
+            else
+                rdoCouponAll.Checked = true;
+            ApplyCouponAudience();
+
             btnCouponSave.Text = "Update Coupon";
-            lblCouponStatus.Text = $"Editing coupon #{editingCouponId} (double-click row to edit).";
+            lblCouponStatus.Text = rdoCouponSpecial.Checked
+                ? $"Editing special coupon #{editingCouponId}. Assign mobiles on Top Customers."
+                : $"Editing common coupon #{editingCouponId}. Mobile is required. Uses / phone limits each number.";
+        }
+
+        private void ApplyCouponAudience()
+        {
+            nudCouponUsesPerPhone.Enabled = true;
         }
 
         private void UpsertCoupon()
@@ -999,6 +1085,8 @@ WHERE id=@id;", conn);
             DateTime validTo = dtValidTo.Value.Date;
             decimal minAmount = nudCouponMinAmount.Value;
             decimal discountAmount = nudCouponDiscountAmount.Value;
+            bool special = rdoCouponSpecial.Checked;
+            int usesPerPhone = (int)nudCouponUsesPerPhone.Value;
             int isActive = chkCouponActive.Checked ? 1 : 0;
 
             if (string.IsNullOrWhiteSpace(code))
@@ -1031,17 +1119,18 @@ WHERE id=@id;", conn);
                 if (editingCouponId <= 0)
                 {
                     using var cmd = new MySqlCommand(@"
-INSERT INTO inv_coupons (coupon_code, title, valid_from, valid_to, min_purchase_amount, discount_amount, is_active)
-VALUES (@code, @title, @validFrom, @validTo, @minAmount, @discountAmount, @active);", conn);
+INSERT INTO inv_coupons (coupon_code, title, valid_from, valid_to, min_purchase_amount, discount_amount, uses_per_phone, is_active, for_special)
+VALUES (@code, @title, @validFrom, @validTo, @minAmount, @discountAmount, @uses, @active, @special);", conn);
                     cmd.Parameters.AddWithValue("@code", code);
                     cmd.Parameters.AddWithValue("@title", title);
                     cmd.Parameters.Add("@validFrom", MySqlDbType.Date).Value = validFrom.Date;
                     cmd.Parameters.Add("@validTo", MySqlDbType.Date).Value = validTo.Date;
                     cmd.Parameters.AddWithValue("@minAmount", minAmount);
                     cmd.Parameters.AddWithValue("@discountAmount", discountAmount);
+                    cmd.Parameters.AddWithValue("@uses", usesPerPhone);
                     cmd.Parameters.AddWithValue("@active", isActive);
+                    cmd.Parameters.AddWithValue("@special", special ? 1 : 0);
                     cmd.ExecuteNonQuery();
-                    lblCouponStatus.Text = "Coupon added.";
                 }
                 else
                 {
@@ -1053,7 +1142,9 @@ UPDATE inv_coupons SET
     valid_to=@validTo,
     min_purchase_amount=@minAmount,
     discount_amount=@discountAmount,
-    is_active=@active
+    uses_per_phone=@uses,
+    is_active=@active,
+    for_special=@special
 WHERE id=@id;", conn);
                     cmd.Parameters.AddWithValue("@id", editingCouponId);
                     cmd.Parameters.AddWithValue("@code", code);
@@ -1062,13 +1153,23 @@ WHERE id=@id;", conn);
                     cmd.Parameters.Add("@validTo", MySqlDbType.Date).Value = validTo.Date;
                     cmd.Parameters.AddWithValue("@minAmount", minAmount);
                     cmd.Parameters.AddWithValue("@discountAmount", discountAmount);
+                    cmd.Parameters.AddWithValue("@uses", usesPerPhone);
                     cmd.Parameters.AddWithValue("@active", isActive);
+                    cmd.Parameters.AddWithValue("@special", special ? 1 : 0);
                     cmd.ExecuteNonQuery();
-                    lblCouponStatus.Text = $"Coupon #{editingCouponId} updated.";
+                    if (!special)
+                    {
+                        using var clear = new MySqlCommand("DELETE FROM inv_coupon_phones WHERE coupon_id=@id", conn);
+                        clear.Parameters.AddWithValue("@id", editingCouponId);
+                        clear.ExecuteNonQuery();
+                    }
                 }
 
                 ReloadCoupons();
                 ResetCouponForm();
+                lblCouponStatus.Text = special
+                    ? "Special coupon saved. Open Top Customers, choose the ranks, and press Assign these."
+                    : "Common coupon saved. Any new or old customer can use it after entering their mobile. Uses / phone limits that number.";
             }
             catch (MySqlException ex) when (ex.Number == 1062)
             {
@@ -1098,6 +1199,12 @@ WHERE id=@id;", conn);
                 using var conn = DB.GetConnection();
                 conn.Open();
                 DB.EnsureCouponSchema(conn);
+
+                using (var phones = new MySqlCommand("DELETE FROM inv_coupon_phones WHERE coupon_id=@id", conn))
+                {
+                    phones.Parameters.AddWithValue("@id", id);
+                    phones.ExecuteNonQuery();
+                }
 
                 using var cmd = new MySqlCommand("DELETE FROM inv_coupons WHERE id=@id", conn);
                 cmd.Parameters.AddWithValue("@id", id);

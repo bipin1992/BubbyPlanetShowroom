@@ -135,6 +135,23 @@ CREATE TABLE IF NOT EXISTS inv_coupons
 
             EnsureColumnExists(conn, "inv_coupons", "min_purchase_amount", "DECIMAL(12,2) NOT NULL DEFAULT 0.00");
             EnsureColumnExists(conn, "inv_coupons", "discount_amount", "DECIMAL(12,2) NOT NULL DEFAULT 0.00");
+            EnsureColumnExists(conn, "inv_coupons", "uses_per_phone", "INT NOT NULL DEFAULT 1");
+            EnsureColumnExists(conn, "inv_coupons", "for_special", "TINYINT(1) NOT NULL DEFAULT 0");
+
+            string createPhones = @"
+CREATE TABLE IF NOT EXISTS inv_coupon_phones
+(
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    coupon_id INT NOT NULL,
+    phone VARCHAR(15) NOT NULL,
+    date_added DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_coupon_phone (coupon_id, phone),
+    KEY ix_coupon_phone_phone (phone)
+);";
+            using (var phones = new MySqlCommand(createPhones, conn))
+            {
+                phones.ExecuteNonQuery();
+            }
         }
 
         public static void EnsureOrderCouponColumns(MySqlConnection conn)

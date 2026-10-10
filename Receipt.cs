@@ -92,6 +92,8 @@ namespace BubbyPlanetShowroom
         DataGridView dgvDraft;
         Panel draftPanel;
         Label lblGrandTotal;
+        Label lblBillSteps;
+        ToolTip billStepsTip;
         Button btnPrint;
         Button btnReset;
         Button btnRetryDraft;
@@ -205,10 +207,14 @@ namespace BubbyPlanetShowroom
         private bool IsManualDiscountRow(DataGridViewRow row)
         {
             object manualVal = row?.Cells["Discount_Manual"]?.Value ?? 0;
-            if (manualVal is bool b)
-                return b;
+            bool flagged = manualVal is bool b
+                ? b
+                : manualVal?.ToString() == "1";
+            if (!flagged)
+                return false;
 
-            return manualVal.ToString() == "1";
+            // Typing 0, or just leaving the cell, is not a sale lock.
+            return GetCellDecimal(row, "Manual_Discount") > 0;
         }
 
         private void LstHoldBills_DoubleClick(object sender, EventArgs e)
@@ -635,6 +641,17 @@ namespace BubbyPlanetShowroom
             lblGrandTotal.BackColor = Color.FromArgb(15, 23, 42);
             lblGrandTotal.ForeColor = Color.White;
             lblGrandTotal.TextAlign = ContentAlignment.MiddleLeft;
+            lblGrandTotal.Padding = new Padding(12, 0, 8, 0);
+
+            lblBillSteps = new Label();
+            lblBillSteps.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+            lblBillSteps.Dock = DockStyle.Fill;
+            lblBillSteps.BackColor = Color.FromArgb(15, 23, 42);
+            lblBillSteps.ForeColor = Color.FromArgb(226, 232, 240);
+            lblBillSteps.TextAlign = ContentAlignment.MiddleLeft;
+            lblBillSteps.AutoEllipsis = true;
+            lblBillSteps.Padding = new Padding(4, 0, 12, 0);
+            billStepsTip = new ToolTip();
 
             btnPrint = new Button();
             btnPrint.Text = "Print Bill";
@@ -868,11 +885,23 @@ namespace BubbyPlanetShowroom
 
             Panel totalsPanel = new Panel();
             totalsPanel.Dock = DockStyle.Bottom;
-            totalsPanel.Height = 42;
-            totalsPanel.Padding = new Padding(0, 0, 0, 6);
-            totalsPanel.BackColor = Color.Transparent;
+            totalsPanel.Height = 48;
+            totalsPanel.Padding = new Padding(0);
+            totalsPanel.BackColor = Color.FromArgb(15, 23, 42);
 
-            totalsPanel.Controls.Add(lblGrandTotal);
+            TableLayoutPanel totalsLayout = new TableLayoutPanel();
+            totalsLayout.Dock = DockStyle.Fill;
+            totalsLayout.ColumnCount = 2;
+            totalsLayout.RowCount = 1;
+            totalsLayout.Margin = new Padding(0);
+            totalsLayout.Padding = new Padding(0);
+            totalsLayout.BackColor = Color.FromArgb(15, 23, 42);
+            totalsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 250F));
+            totalsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            totalsLayout.Controls.Add(lblGrandTotal, 0, 0);
+            totalsLayout.Controls.Add(lblBillSteps, 1, 0);
+
+            totalsPanel.Controls.Add(totalsLayout);
 
             centerPanel.Controls.Add(dgvRight);
             centerPanel.Controls.Add(draftPanel);
@@ -1151,6 +1180,9 @@ namespace BubbyPlanetShowroom
                 lastRewardCheckMobile = "";
                 lastRewardCheckGrandTotal = -1;
             }
+
+            if (!string.IsNullOrWhiteSpace(txtCouponCode?.Text))
+                RefreshCouponHint();
         }
 
         private void MaybeCheckRewardDiscount()
@@ -1257,11 +1289,11 @@ namespace BubbyPlanetShowroom
                 }
 
                 decimal discount;
-                // Manual lines: keep cashier sale % only (no reward on that item),
-                // but their net value still counts in reward eligibility total.
                 if (IsManualDiscountRow(row))
                 {
-                    discount = GetCellDecimal(row, "Manual_Discount");
+                    discount = ClampDiscount(
+                        GetCellDecimal(row, "Manual_Discount") +
+                        rewardDiscount);
                 }
                 else
                 {
@@ -1520,13 +1552,10 @@ namespace BubbyPlanetShowroom
                 return;
             }
 
-            // All lines are manual sale discounts → reward would lock cycle with 0% benefit.
             if (!HasRewardApplicableRows())
             {
                 MessageBox.Show(
-                    "Is bill me sirf manual discount wale items hain.\n" +
-                    "Reward un items pe nahi lagta.\n\n" +
-                    "Normal (non-sale) item add karein, tab reward redeem hoga.",
+                    "Reward lagane ke liye bill mein item hona chahiye.",
                     "Reward Program",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -1551,8 +1580,7 @@ namespace BubbyPlanetShowroom
                     continue;
                 if (row.Cells[0].Value == null)
                     continue;
-                if (!IsManualDiscountRow(row))
-                    return true;
+                return true;
             }
             return false;
         }
@@ -1564,11 +1592,14 @@ namespace BubbyPlanetShowroom
                 if (row.IsNewRow)
                     continue;
 
-                // Manual sale-counter discount is locked for that item only.
-                // Reward must NOT change it. Reward applies only to non-manual items.
+                // A typed percent replaces auto on that line. Reward still adds, same as other items.
                 if (IsManualDiscountRow(row))
                 {
-                    SetDiscountBreakdown(row, 0, GetCellDecimal(row, "Manual_Discount"), 0);
+                    SetDiscountBreakdown(
+                        row,
+                        0,
+                        GetCellDecimal(row, "Manual_Discount"),
+                        rewardDiscountPercent);
                     continue;
                 }
 
@@ -1950,8 +1981,8 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                         if (manualDiscount <= 0)
                             manualDiscount = currentDiscount;
 
-                        discount = ClampDiscount(manualDiscount);
-                        SetDiscountBreakdown(existingRow, 0, manualDiscount, 0);
+                        discount = ClampDiscount(manualDiscount + rowRewardDiscount);
+                        SetDiscountBreakdown(existingRow, 0, manualDiscount, rowRewardDiscount);
                     }
 
                     CalculateLineAmounts(
@@ -2367,7 +2398,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                     decimal rowRewardDiscount = rewardApplied ? rewardDiscountPercent : GetCellDecimal(row, "Reward_Discount");
 
                     if (isManual)
-                        SetDiscountBreakdown(row, 0, manualDiscount, 0);
+                        SetDiscountBreakdown(row, 0, manualDiscount, rowRewardDiscount);
                     else
                         SetDiscountBreakdown(row, autoDiscount, 0, rowRewardDiscount);
                 }
@@ -2691,12 +2722,13 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 y += 22;
             }
 
-            g.DrawString("Taxable: " + totaltaxableamount.ToString("0.00"), normalFont, Brushes.Black, 5, y);
+            SumCouponAdjustedTotals(out decimal printTaxable, out decimal printGst, out _);
+            g.DrawString("Taxable: " + printTaxable.ToString("0.00"), normalFont, Brushes.Black, 5, y);
             y += 15;
-            g.DrawString("GST: " + totalgst.ToString("0.00"), normalFont, Brushes.Black, 5, y);
+            g.DrawString("GST: " + printGst.ToString("0.00"), normalFont, Brushes.Black, 5, y);
             y += 15;
-            decimal cgstTotal = Round2(totalgst / 2m);
-            decimal sgstTotal = Round2(totalgst - cgstTotal);
+            decimal cgstTotal = Round2(printGst / 2m);
+            decimal sgstTotal = Round2(printGst - cgstTotal);
             g.DrawString("CGST: " + cgstTotal.ToString("0.00") + "  SGST: " + sgstTotal.ToString("0.00"), normalFont, Brushes.Black, 5, y);
             y += 15;
             g.DrawString("Total: " + grandTotal.ToString("0.00"), normalFont, Brushes.Black, 5, y);
@@ -2815,6 +2847,10 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 MessageBox.Show("No items to save.");
                 return false;
             }
+
+            string couponCode = CouponCalculations.NormalizeCode(txtCouponCode?.Text);
+            if (!string.IsNullOrWhiteSpace(couponCode) && !ApplyValidatedCouponToTotals(showMessage: true))
+                return false;
 
             ConfigureReceiptPaperSize();
             PrinterRouting.ApplyReceiptReturnPrinter(printDocument);
@@ -3651,6 +3687,45 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             sync.ExecuteNonQuery();
         }
 
+        private void SumCouponAdjustedTotals(out decimal taxableTotal, out decimal gstTotal, out decimal netTotal)
+        {
+            taxableTotal = 0m;
+            gstTotal = 0m;
+            netTotal = 0m;
+            decimal[] shares = BuildSaleCouponShares();
+            int shareIndex = 0;
+
+            foreach (DataGridViewRow row in dgvRight.Rows)
+            {
+                if (row.IsNewRow || row.Cells[0].Value == null)
+                    continue;
+
+                if (!decimal.TryParse(row.Cells[5].Value?.ToString(), out decimal gross) ||
+                    !decimal.TryParse(row.Cells[6].Value?.ToString(), out decimal taxable) ||
+                    !decimal.TryParse(row.Cells[7].Value?.ToString(), out decimal gst) ||
+                    !decimal.TryParse(row.Cells[8].Value?.ToString(), out decimal net))
+                {
+                    continue;
+                }
+
+                decimal share = shareIndex < shares.Length ? shares[shareIndex] : 0m;
+                shareIndex++;
+                CouponCalculations.CouponAdjustedLine adjusted = CouponCalculations.AddCouponToLine(
+                    Round2(gross - (taxable + gst)),
+                    taxable,
+                    gst,
+                    net,
+                    share);
+                taxableTotal += adjusted.TaxableAmount;
+                gstTotal += adjusted.GstAmount;
+                netTotal += adjusted.NetAmount;
+            }
+
+            taxableTotal = Round2(taxableTotal);
+            gstTotal = Round2(gstTotal);
+            netTotal = Round2(netTotal);
+        }
+
         private decimal[] BuildSaleCouponShares()
         {
             var quantities = new List<int>();
@@ -3818,13 +3893,24 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                 decimal discount = GetCellDecimal(row, 1);
                 decimal rewardDiscount = rewardApplied ? rewardDiscountPercent : GetCellDecimal(row, "Reward_Discount");
 
-                // Mark discount as manual edit if user edited the Discount % column.
-                // Manual % is locked for this item — reward must not override it.
+                // Typed percent replaces auto. The cell shows that percent plus reward,
+                // so leaving it unchanged must not add the reward a second time.
                 if (e.ColumnIndex == 1)
                 {
-                    row.Cells["Discount_Manual"].Value = 1;
-                    decimal manualDiscount = ClampDiscount(discount);
-                    SetDiscountBreakdown(row, 0, manualDiscount, 0);
+                    decimal manualBase = CouponSaleMath.ManualBaseFromDiscountEdit(
+                        discount,
+                        GetCellDecimal(row, "Manual_Discount"),
+                        rewardDiscount);
+                    if (manualBase <= 0)
+                    {
+                        row.Cells["Discount_Manual"].Value = 0;
+                        SetDiscountBreakdown(row, refreshedAutoDiscount, 0, rewardDiscount);
+                    }
+                    else
+                    {
+                        row.Cells["Discount_Manual"].Value = 1;
+                        SetDiscountBreakdown(row, 0, manualBase, rewardDiscount);
+                    }
                     discount = GetCellDecimal(row, 1);
                 }
                 else
@@ -3833,7 +3919,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
 
                     decimal manualDiscount = isManual ? GetCellDecimal(row, "Manual_Discount") : 0;
                     if (isManual)
-                        SetDiscountBreakdown(row, 0, manualDiscount, 0);
+                        SetDiscountBreakdown(row, 0, manualDiscount, rewardDiscount);
                     else
                         SetDiscountBreakdown(row, refreshedAutoDiscount, 0, rewardDiscount);
                     discount = GetCellDecimal(row, 1);
@@ -3892,7 +3978,10 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             totaltaxableamount = 0;
             totalgst = 0;
 
-            lblGrandTotal.Text = "Grand Total: 0.00";
+            itemsGrandTotal = 0;
+            appliedCouponDiscount = 0;
+            appliedCouponCode = "";
+            ShowGrandTotal();
 
             txtMobile.Clear();
             txtName.Clear();
@@ -3908,9 +3997,6 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             lastRewardMobile = "";
             lastRewardCheckMobile = "";
             lastRewardCheckGrandTotal = -1;
-            itemsGrandTotal = 0;
-            appliedCouponDiscount = 0;
-            appliedCouponCode = "";
 
             if (txtCouponCode != null)
                 txtCouponCode.Clear();
@@ -3929,7 +4015,10 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             totaltaxableamount = 0;
             totalgst = 0;
 
-            lblGrandTotal.Text = "Grand Total: 0.00";
+            itemsGrandTotal = 0;
+            appliedCouponDiscount = 0;
+            appliedCouponCode = "";
+            ShowGrandTotal();
 
             txtMobile.Clear();
             txtName.Clear();
@@ -3947,9 +4036,6 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             lastRewardCheckMobile = "";
             lastRewardCheckGrandTotal = -1;
             currentMembership = "";
-            itemsGrandTotal = 0;
-            appliedCouponDiscount = 0;
-            appliedCouponCode = "";
 
             if (txtCouponCode != null)
                 txtCouponCode.Clear();
@@ -4117,7 +4203,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             if (string.IsNullOrWhiteSpace(code))
                 return false;
 
-            if (!TryLoadCouponRecord(code, out _, out _, out _, out _, out _, out bool found) || !found)
+            if (!TryLoadCouponRecord(code, out _, out _, out _, out _, out _, out _, out bool found) || !found)
                 return false;
 
             if (txtCouponCode != null)
@@ -4134,6 +4220,17 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
 
         private bool ApplyValidatedCouponToTotals(bool showMessage)
         {
+            if (!CouponCalculations.IsOneCouponCode(txtCouponCode?.Text))
+            {
+                ClearAppliedCouponState();
+                if (lblCoupon != null)
+                    lblCoupon.Text = "One code";
+                UpdatePayableTotal();
+                if (showMessage)
+                    MessageBox.Show("Only one coupon code can be used on a bill.");
+                return false;
+            }
+
             string code = CouponCalculations.NormalizeCode(txtCouponCode?.Text);
             if (string.IsNullOrWhiteSpace(code))
             {
@@ -4153,6 +4250,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                     out DateTime from,
                     out DateTime to,
                     out bool active,
+                    out int usesPerPhone,
                     out bool found))
                 {
                     ClearAppliedCouponState();
@@ -4172,6 +4270,24 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
                     minAmount,
                     discountAmount,
                     itemsGrandTotal);
+
+                if (result.Found && result.Status == "Valid")
+                {
+                    CouponPhoneGateResult gate = CheckCouponPhone(code, usesPerPhone);
+                    if (!gate.Allowed)
+                    {
+                        ClearAppliedCouponState();
+                        if (lblCoupon != null)
+                            lblCoupon.Text = string.IsNullOrWhiteSpace(gate.Status) ? "Coupon" : gate.Status;
+                        UpdatePayableTotal();
+                        if (showMessage && !string.IsNullOrWhiteSpace(gate.Message))
+                        {
+                            MessageBox.Show(gate.Message);
+                            txtCouponCode?.Focus();
+                        }
+                        return false;
+                    }
+                }
 
                 if (!result.Applied)
                 {
@@ -4226,10 +4342,49 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
         private void UpdatePayableTotal()
         {
             grandTotal = CouponCalculations.PayableAfterCoupon(itemsGrandTotal, appliedCouponDiscount);
-            if (lblGrandTotal != null)
-                lblGrandTotal.Text = "Grand Total: " + grandTotal.ToString("0.00");
+            ShowGrandTotal();
             ShowCouponOffOnEachItem();
             CalculateReturnAmount();
+        }
+
+        private void ShowGrandTotal()
+        {
+            if (lblGrandTotal != null)
+                lblGrandTotal.Text = "Grand Total: " + grandTotal.ToString("0.00");
+            if (lblBillSteps == null)
+                return;
+
+            string steps = BuildBillStepsText();
+            lblBillSteps.Text = steps;
+            billStepsTip?.SetToolTip(lblBillSteps, steps);
+        }
+
+        private string BuildBillStepsText()
+        {
+            var lines = new System.Collections.Generic.List<ReceiptBillBreakdown.Line>();
+            if (dgvRight == null)
+                return "";
+
+            foreach (DataGridViewRow row in dgvRight.Rows)
+            {
+                if (row.IsNewRow || row.Cells[0].Value == null)
+                    continue;
+                if (!decimal.TryParse(row.Cells[3].Value?.ToString(), out decimal price))
+                    continue;
+                if (!int.TryParse(row.Cells[4].Value?.ToString(), out int qty) || qty <= 0)
+                    continue;
+
+                bool manual = IsManualDiscountRow(row);
+                lines.Add(new ReceiptBillBreakdown.Line(
+                    price,
+                    qty,
+                    manual ? 0m : GetCellDecimal(row, "Auto_Discount"),
+                    manual ? GetCellDecimal(row, "Manual_Discount") : 0m,
+                    GetCellDecimal(row, "Reward_Discount"),
+                    manual));
+            }
+
+            return ReceiptBillBreakdown.Build(lines, appliedCouponDiscount).Text;
         }
 
         private void ShowCouponOffOnEachItem()
@@ -4250,6 +4405,22 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             }
         }
 
+        private CouponPhoneGateResult CheckCouponPhone(string code, int usesPerPhone)
+        {
+            using var conn = DB.GetConnection();
+            conn.Open();
+            DB.EnsureCouponSchema(conn);
+            CouponPhoneUse use = CouponCustomerAccess.ReadUse(conn, code, txtMobile?.Text);
+            return CouponCustomerAccess.CheckAssignedUse(
+                code,
+                txtMobile?.Text,
+                use.HasAssignments,
+                use.PhoneIsAssigned,
+                usesPerPhone,
+                use.RedeemedCount,
+                use.SpecialOnly);
+        }
+
         private bool TryLoadCouponRecord(
             string code,
             out decimal minAmount,
@@ -4257,6 +4428,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             out DateTime validFrom,
             out DateTime validTo,
             out bool isActive,
+            out int usesPerPhone,
             out bool found)
         {
             minAmount = 0;
@@ -4264,6 +4436,7 @@ LEFT JOIN inv_stock s ON LOWER(TRIM(i.item_code)) = LOWER(TRIM(s.item_code))
             validFrom = DateTime.MinValue;
             validTo = DateTime.MinValue;
             isActive = false;
+            usesPerPhone = 1;
             found = false;
 
             using var conn = DB.GetConnection();
@@ -4275,7 +4448,8 @@ SELECT min_purchase_amount,
        discount_amount,
        DATE_FORMAT(valid_from, '%Y-%m-%d') AS valid_from,
        DATE_FORMAT(valid_to, '%Y-%m-%d') AS valid_to,
-       is_active
+       is_active,
+       uses_per_phone
 FROM inv_coupons
 WHERE coupon_code=@code
 LIMIT 1", conn);
@@ -4290,6 +4464,7 @@ LIMIT 1", conn);
             validFrom = CouponCalculations.ToDate(reader["valid_from"]);
             validTo = CouponCalculations.ToDate(reader["valid_to"]);
             isActive = CouponCalculations.ToBool(reader["is_active"]);
+            usesPerPhone = CouponCustomerAccess.AllowedUses((int)CouponCalculations.ToAmount(reader["uses_per_phone"]));
             found = true;
             return true;
         }
@@ -4350,7 +4525,11 @@ LIMIT 1", conn);
 
                 if (IsManualDiscountRow(row))
                 {
-                    SetDiscountBreakdown(row, 0, GetCellDecimal(row, "Manual_Discount"), 0);
+                    SetDiscountBreakdown(
+                        row,
+                        0,
+                        GetCellDecimal(row, "Manual_Discount"),
+                        rewardApplied ? rewardDiscountPercent : GetCellDecimal(row, "Reward_Discount"));
                 }
                 else
                 {

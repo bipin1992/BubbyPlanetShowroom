@@ -69,6 +69,45 @@ namespace BubbyPlanetShowroom
             return sum;
         }
 
+        public static decimal ClampPercent(decimal value)
+        {
+            if (value < 0m)
+                return 0m;
+            if (value > 100m)
+                return 100m;
+            return value;
+        }
+
+        /// <summary>
+        /// One line percent. A typed manual percent replaces auto.
+        /// Reward is added on top of whichever base is active.
+        /// </summary>
+        public static decimal LinePercent(decimal auto, decimal manual, decimal reward, bool manualRow)
+        {
+            decimal basePercent = manualRow ? Math.Max(0m, manual) : Math.Max(0m, auto);
+            return ClampPercent(basePercent + Math.Max(0m, reward));
+        }
+
+        /// <summary>
+        /// Discount % shows base + reward. Leaving that cell must not add reward again.
+        /// A new number is a new manual base. Zero clears the manual lock.
+        /// </summary>
+        public static decimal ManualBaseFromDiscountEdit(decimal typedPercent, decimal storedManual, decimal rewardPercent)
+        {
+            decimal typed = ClampPercent(typedPercent);
+            decimal reward = Math.Max(0m, rewardPercent);
+            if (reward > 100m)
+                reward = 100m;
+            if (typed <= 0m)
+                return 0m;
+
+            decimal stored = Math.Max(0m, storedManual);
+            decimal shown = ClampPercent(stored + reward);
+            if (stored > 0m && typed == shown)
+                return ClampPercent(stored);
+            return typed;
+        }
+
         /// <summary>
         /// Manual mall % replaces reward. Reward cancel drops only the reward part.
         /// Mall 0% adds nothing.

@@ -12,6 +12,16 @@ namespace BubbyPlanetShowroom.Tests
         }
 
         [Fact]
+        public void IsOneCouponCode_RejectsASecondCode()
+        {
+            Assert.True(CouponCalculations.IsOneCouponCode("P10"));
+            Assert.True(CouponCalculations.IsOneCouponCode(""));
+            Assert.False(CouponCalculations.IsOneCouponCode("P10 P20"));
+            Assert.False(CouponCalculations.IsOneCouponCode("P10,C30"));
+            Assert.False(CouponCalculations.IsOneCouponCode("P10+P20"));
+        }
+
+        [Fact]
         public void IsDateRangeValid_RejectsEndBeforeStart()
         {
             Assert.False(CouponCalculations.IsDateRangeValid(
